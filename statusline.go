@@ -527,17 +527,28 @@ func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
 const widthFallback = 120
 
 func detectWidth() int {
-	// 1. ioctl on stderr (most reliable when CC pipes a TTY through)
-	if w, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil && w > 0 {
-		return w
+	// 1. /dev/tty — always reflects the current controlling terminal size,
+	//    regardless of how stdin/stdout/stderr were redirected by CC.
+	if f, err := os.OpenFile("/dev/tty", os.O_RDONLY, 0); err == nil {
+		w, _, gerr := term.GetSize(int(f.Fd()))
+		f.Close()
+		if gerr == nil && w > 0 {
+			return w
+		}
 	}
-	// 2. COLUMNS env var
+	// 2. ioctl on stderr / stdout / stdin in case /dev/tty wasn't accessible
+	for _, fd := range []int{int(os.Stderr.Fd()), int(os.Stdout.Fd()), int(os.Stdin.Fd())} {
+		if w, _, err := term.GetSize(fd); err == nil && w > 0 {
+			return w
+		}
+	}
+	// 3. COLUMNS env var (often stale because CC sets it once at startup)
 	if v := os.Getenv("COLUMNS"); v != "" {
 		if w, err := strconv.Atoi(v); err == nil && w > 0 {
 			return w
 		}
 	}
-	// 3. fallback
+	// 4. fallback
 	return widthFallback
 }
 
