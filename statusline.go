@@ -8,7 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // ==== SECTION: INPUT TYPES ====
@@ -502,6 +505,25 @@ func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
 	}
 	u, m, d := parsePorcelain(string(pb))
 	return branch, u, m, d
+}
+
+// ==== SECTION: WIDTH ====
+
+const widthFallback = 120
+
+func detectWidth() int {
+	// 1. ioctl on stderr (most reliable when CC pipes a TTY through)
+	if w, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil && w > 0 {
+		return w
+	}
+	// 2. COLUMNS env var
+	if v := os.Getenv("COLUMNS"); v != "" {
+		if w, err := strconv.Atoi(v); err == nil && w > 0 {
+			return w
+		}
+	}
+	// 3. fallback
+	return widthFallback
 }
 
 // ==== SECTION: MAIN ====
