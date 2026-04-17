@@ -68,3 +68,50 @@ func TestColorizeNoColor(t *testing.T) {
 		t.Errorf("colorize with empty color = %q, want hi", got)
 	}
 }
+
+func TestAbbreviatePath(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		level int
+		want  string
+	}{
+		{"l0 full", "~/projects/test-projects/project-1", 0, "~/projects/test-projects/project-1"},
+		{"l1 first parent abbrev", "~/projects/test-projects/project-1", 1, "~/p/test-projects/project-1"},
+		{"l2 fish style", "~/projects/test-projects/project-1", 2, "~/p/t/project-1"},
+		{"l3 ellipsis parents", "~/projects/test-projects/project-1", 3, "…/project-1"},
+		{"l4 truncate leaf", "~/projects/test-projects/project-1", 4, "…1"},
+		{"home only l0", "~", 0, "~"},
+		{"home only l2", "~", 2, "~"},
+		{"single segment l2", "/etc", 2, "/etc"},
+		{"two segments l2", "/etc/nginx", 2, "/e/nginx"},
+		{"empty", "", 0, "?"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := abbreviatePath(tt.path, tt.level)
+			if got != tt.want {
+				t.Errorf("abbreviatePath(%q, %d) = %q, want %q", tt.path, tt.level, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubstituteHome(t *testing.T) {
+	tests := []struct {
+		path, home, want string
+	}{
+		{"/home/u/projects/x", "/home/u", "~/projects/x"},
+		{"/home/u", "/home/u", "~"},
+		{"/etc/nginx", "/home/u", "/etc/nginx"},
+		{"/home/user2/x", "/home/u", "/home/user2/x"},
+		{"", "/home/u", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := substituteHome(tt.path, tt.home); got != tt.want {
+				t.Errorf("substituteHome(%q, %q) = %q, want %q", tt.path, tt.home, got, tt.want)
+			}
+		})
+	}
+}
