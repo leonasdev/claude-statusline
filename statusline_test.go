@@ -315,3 +315,58 @@ func TestExtractKeptModelEOL(t *testing.T) {
 		t.Errorf("kept = %q", got)
 	}
 }
+
+func TestScanTranscriptEmpty(t *testing.T) {
+	effort, model, err := scanTranscript("testdata/transcripts/empty.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effort != "" || model != "" {
+		t.Errorf("expected empty, got effort=%q model=%q", effort, model)
+	}
+}
+
+func TestScanTranscriptSingleEffort(t *testing.T) {
+	effort, model, err := scanTranscript("testdata/transcripts/single_effort.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effort != "high" {
+		t.Errorf("effort = %q, want high", effort)
+	}
+	if model != "" {
+		t.Errorf("model = %q, want empty", model)
+	}
+}
+
+func TestScanTranscriptMultiEffortLatestWins(t *testing.T) {
+	effort, _, err := scanTranscript("testdata/transcripts/multi_effort.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effort != "max" {
+		t.Errorf("effort = %q, want max (latest)", effort)
+	}
+}
+
+func TestScanTranscriptModelChange(t *testing.T) {
+	effort, model, err := scanTranscript("testdata/transcripts/model_change.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Latest /effort line wins for effort
+	if effort != "high" {
+		t.Errorf("effort = %q, want high", effort)
+	}
+	// Only "Set model to" line provided model
+	if model != "Opus 4.7 (1M context) (default)" {
+		t.Errorf("model = %q", model)
+	}
+}
+
+func TestScanTranscriptMissingFile(t *testing.T) {
+	_, _, err := scanTranscript("testdata/transcripts/does_not_exist.jsonl")
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}

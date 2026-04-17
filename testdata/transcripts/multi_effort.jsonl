@@ -1,0 +1,4 @@
+{"type":"permission-mode","permissionMode":"auto","sessionId":"x"}
+{"type":"user","content":"<command-name>/effort</command-name><local-command-stdout>Set effort level to medium: x</local-command-stdout>"}
+{"type":"user","content":"<command-name>/effort</command-name><local-command-stdout>Set effort level to xhigh: y</local-command-stdout>"}
+{"type":"user","content":"<command-name>/effort</command-name><local-command-stdout>Set effort level to max (this session only): z</local-command-stdout>"}

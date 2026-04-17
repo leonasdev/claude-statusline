@@ -290,6 +290,82 @@ func extractLatestKeptModel(s string) string {
 	return matches[len(matches)-1][1]
 }
 
+// ==== SECTION: TRANSCRIPT SCAN ====
+
+const (
+	transcriptChunkSize = 64 * 1024
+	transcriptMaxBudget = 1024 * 1024
+)
+
+func scanTranscript(path string) (effort, model string, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return "", "", err
+	}
+	size := stat.Size()
+	if size == 0 {
+		return "", "", nil
+	}
+
+	pos := size
+	bytesRead := int64(0)
+	var buffer []byte
+
+	for pos > 0 && bytesRead < transcriptMaxBudget {
+		readSize := int64(transcriptChunkSize)
+		if pos < readSize {
+			readSize = pos
+		}
+		newPos := pos - readSize
+		if _, err := f.Seek(newPos, io.SeekStart); err != nil {
+			return "", "", err
+		}
+		chunk := make([]byte, readSize)
+		if _, err := io.ReadFull(f, chunk); err != nil {
+			return "", "", err
+		}
+		pos = newPos
+		bytesRead += readSize
+		buffer = append(chunk, buffer...)
+
+		stripped := stripANSI(string(buffer))
+
+		if effort == "" {
+			if v := extractLatestEffort(stripped); v != "" {
+				effort = v
+			}
+			if m, e := extractLatestModelSet(stripped); e != "" {
+				if effort == "" {
+					effort = e
+				}
+				if model == "" {
+					model = m
+				}
+			}
+		}
+		if model == "" {
+			if m, _ := extractLatestModelSet(stripped); m != "" {
+				model = m
+			}
+			if v := extractLatestKeptModel(stripped); v != "" {
+				model = v
+			}
+		}
+
+		if effort != "" && model != "" {
+			break
+		}
+	}
+
+	return effort, model, nil
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {
