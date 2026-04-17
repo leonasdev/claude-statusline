@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -432,6 +433,75 @@ func readSettingsEffort(path string) string {
 
 func defaultSettingsPath() string {
 	return filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
+}
+
+// ==== SECTION: GIT ====
+
+const gitBranchIcon = "\ue0a0" //
+
+func parsePorcelain(raw string) (untracked, modified, deleted int) {
+	for _, line := range strings.Split(raw, "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		xy := line[:2]
+		if xy == "??" {
+			untracked++
+			continue
+		}
+		// rename / copy entries (R/C) ignored entirely
+		if xy[0] == 'R' || xy[0] == 'C' {
+			continue
+		}
+		hasM := xy[0] == 'M' || xy[1] == 'M'
+		hasD := xy[0] == 'D' || xy[1] == 'D'
+		if hasM {
+			modified++
+		}
+		if hasD {
+			deleted++
+		}
+	}
+	return
+}
+
+func formatGit(branch string, untracked, modified, deleted int) string {
+	if branch == "" {
+		return ""
+	}
+	out := gitBranchIcon + " " + branch
+	if untracked > 0 {
+		out += fmt.Sprintf(" ?%d", untracked)
+	}
+	if modified > 0 {
+		out += fmt.Sprintf(" ~%d", modified)
+	}
+	if deleted > 0 {
+		out += fmt.Sprintf(" -%d", deleted)
+	}
+	return out
+}
+
+// runGitInfo fetches branch + porcelain. Returns ("", 0,0,0) if not in a repo.
+func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
+	bb, err := exec.Command("git", "-C", cwd, "branch", "--show-current").Output()
+	if err != nil {
+		return "", 0, 0, 0
+	}
+	branch = strings.TrimSpace(string(bb))
+	if branch == "" {
+		// detached HEAD or empty repo — try short SHA
+		ss, err := exec.Command("git", "-C", cwd, "rev-parse", "--short", "HEAD").Output()
+		if err == nil {
+			branch = strings.TrimSpace(string(ss))
+		}
+	}
+	pb, err := exec.Command("git", "-C", cwd, "status", "--porcelain=v1", "-uall").Output()
+	if err != nil {
+		return branch, 0, 0, 0
+	}
+	u, m, d := parsePorcelain(string(pb))
+	return branch, u, m, d
 }
 
 // ==== SECTION: MAIN ====

@@ -464,3 +464,51 @@ func TestReadSettingsEffortNoField(t *testing.T) {
 		t.Errorf("got %q, want empty", got)
 	}
 }
+
+func TestParsePorcelain(t *testing.T) {
+	tests := []struct {
+		name                          string
+		raw                           string
+		untracked, modified, deleted  int
+	}{
+		{"empty", "", 0, 0, 0},
+		{"untracked only", "?? a.txt\n?? b.txt\n", 2, 0, 0},
+		{"modified", " M a.txt\nM  b.txt\n", 0, 2, 0},
+		{"deleted", " D a.txt\nD  b.txt\n", 0, 0, 2},
+		{"mixed", "?? a\n M b\nD  c\n", 1, 1, 1},
+		{"MM same file", "MM a\n", 0, 1, 0},
+		{"renamed (ignored)", "R  a -> b\n", 0, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			u, m, d := parsePorcelain(tt.raw)
+			if u != tt.untracked || m != tt.modified || d != tt.deleted {
+				t.Errorf("parsePorcelain(%q) = (u=%d m=%d d=%d), want (u=%d m=%d d=%d)",
+					tt.raw, u, m, d, tt.untracked, tt.modified, tt.deleted)
+			}
+		})
+	}
+}
+
+func TestFormatGit(t *testing.T) {
+	tests := []struct {
+		branch                       string
+		untracked, modified, deleted int
+		want                         string
+	}{
+		{"main", 0, 0, 0, "\ue0a0 main"},
+		{"master", 3, 0, 0, "\ue0a0 master ?3"},
+		{"feat/x", 0, 8, 0, "\ue0a0 feat/x ~8"},
+		{"main", 0, 0, 2, "\ue0a0 main -2"},
+		{"main", 3, 8, 2, "\ue0a0 main ?3 ~8 -2"},
+		{"", 0, 0, 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := formatGit(tt.branch, tt.untracked, tt.modified, tt.deleted)
+			if got != tt.want {
+				t.Errorf("formatGit = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
