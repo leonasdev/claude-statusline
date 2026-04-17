@@ -115,3 +115,24 @@ func TestSubstituteHome(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderBar(t *testing.T) {
+	tests := []struct {
+		pct  float64
+		want string
+	}{
+		{0, "░░░░░░░░░░░░░░░░"},
+		{6.25, "█░░░░░░░░░░░░░░░"},
+		{50, "████████░░░░░░░░"},
+		{100, "████████████████"},
+		{150, "████████████████"}, // clamp
+		{-5, "░░░░░░░░░░░░░░░░"}, // clamp
+	}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			if got := renderBar(tt.pct, 16); got != tt.want {
+				t.Errorf("renderBar(%v, 16) = %q, want %q", tt.pct, got, tt.want)
+			}
+		})
+	}
+}

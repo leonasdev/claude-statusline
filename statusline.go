@@ -163,6 +163,22 @@ func abbreviatePath(path string, level int) string {
 	}
 }
 
+// ==== SECTION: BAR ====
+
+func renderBar(pct float64, width int) string {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	filled := int(pct / 100.0 * float64(width))
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {
