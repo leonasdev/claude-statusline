@@ -164,3 +164,45 @@ func TestFormatDuration(t *testing.T) {
 		})
 	}
 }
+
+func TestEffortDisplay(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"low", "○ low"},
+		{"medium", "◐ medium"},
+		{"high", "● high"},
+		{"xhigh", "◉ xhigh"},
+		{"max", "◈ max"},
+		{"unknown", "● high"}, // default fallback
+		{"", "● high"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := effortDisplay(tt.in); got != tt.want {
+				t.Errorf("effortDisplay(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestModelDisplay(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"Opus 4.7 (1M context) (default)", "Opus 4.7 (1M)"},
+		{"Sonnet 4.6 (1M context)", "Sonnet 4.6 (1M)"},
+		{"Sonnet 4.6 (1M context) (default)", "Sonnet 4.6 (1M)"},
+		{"Sonnet 4.6", "Sonnet 4.6"},
+		{"Haiku 4.5", "Haiku 4.5"},
+		{"Opus 4.6", "Opus 4.6"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := modelDisplay(tt.in); got != tt.want {
+				t.Errorf("modelDisplay(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

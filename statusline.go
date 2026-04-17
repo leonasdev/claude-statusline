@@ -205,6 +205,32 @@ func formatDuration(secs int64) string {
 	return fmt.Sprintf("%dm", mins)
 }
 
+// ==== SECTION: EFFORT/MODEL DISPLAY ====
+
+var effortIcons = map[string]string{
+	"low":    "○ low",
+	"medium": "◐ medium",
+	"high":   "● high",
+	"xhigh":  "◉ xhigh",
+	"max":    "◈ max",
+}
+
+func effortDisplay(level string) string {
+	if v, ok := effortIcons[strings.ToLower(level)]; ok {
+		return v
+	}
+	return effortIcons["high"]
+}
+
+func modelDisplay(name string) string {
+	if name == "" {
+		return ""
+	}
+	name = strings.TrimSuffix(name, " (default)")
+	name = strings.ReplaceAll(name, " (1M context)", " (1M)")
+	return name
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {
