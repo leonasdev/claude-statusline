@@ -46,6 +46,26 @@ func parseInput(r io.Reader) (*Input, error) {
 	return &in, nil
 }
 
+// ==== SECTION: COLORS ====
+
+const (
+	colorReset       = "\x1b[0m"
+	colorLightYellow = "\x1b[93m"
+	colorLightBlack  = "\x1b[90m"
+	colorClaudeBold  = "\x1b[1;38;2;217;119;87m"
+	colorNone        = ""
+)
+
+func colorize(s, color string) string {
+	if s == "" {
+		return ""
+	}
+	if color == "" {
+		return s
+	}
+	return color + s + colorReset
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {

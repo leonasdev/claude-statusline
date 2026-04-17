@@ -48,3 +48,23 @@ func TestParseInput(t *testing.T) {
 		t.Errorf("ResetsAt = %v", in.RateLimits.FiveHour.ResetsAt)
 	}
 }
+
+func TestColorize(t *testing.T) {
+	got := colorize("hello", colorLightYellow)
+	want := "\x1b[93mhello\x1b[0m"
+	if got != want {
+		t.Errorf("colorize = %q, want %q", got, want)
+	}
+}
+
+func TestColorizeEmpty(t *testing.T) {
+	if colorize("", colorLightYellow) != "" {
+		t.Error("colorize of empty should be empty")
+	}
+}
+
+func TestColorizeNoColor(t *testing.T) {
+	if got := colorize("hi", ""); got != "hi" {
+		t.Errorf("colorize with empty color = %q, want hi", got)
+	}
+}
