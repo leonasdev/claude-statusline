@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -364,6 +365,53 @@ func scanTranscript(path string) (effort, model string, err error) {
 	}
 
 	return effort, model, nil
+}
+
+// ==== SECTION: CACHE ====
+
+type CacheEntry struct {
+	Effort            string `json:"effort,omitempty"`
+	Model             string `json:"model,omitempty"`
+	TranscriptMtimeNs int64  `json:"transcript_mtime_ns,omitempty"`
+	TranscriptSize    int64  `json:"transcript_size,omitempty"`
+}
+
+func cachePath(sessionID string) string {
+	dir := os.Getenv("XDG_CACHE_HOME")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), ".cache")
+	}
+	return filepath.Join(dir, "claude-statusline", sessionID+".json")
+}
+
+func loadCache(path string) (*CacheEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &CacheEntry{}, nil
+		}
+		return &CacheEntry{}, nil // treat any read error as empty
+	}
+	var c CacheEntry
+	if err := json.Unmarshal(data, &c); err != nil {
+		return &CacheEntry{}, nil // corrupt → empty
+	}
+	return &c, nil
+}
+
+func saveCache(path string, c *CacheEntry) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // ==== SECTION: MAIN ====

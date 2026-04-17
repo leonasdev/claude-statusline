@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -368,5 +370,67 @@ func TestScanTranscriptMissingFile(t *testing.T) {
 	_, _, err := scanTranscript("testdata/transcripts/does_not_exist.jsonl")
 	if err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+func TestCacheRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	c := &CacheEntry{
+		Effort:            "xhigh",
+		Model:             "Opus 4.7 (1M context) (default)",
+		TranscriptMtimeNs: 1234567890,
+		TranscriptSize:    9999,
+	}
+	path := filepath.Join(dir, "session.json")
+	if err := saveCache(path, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadCache(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Effort != "xhigh" || got.Model != "Opus 4.7 (1M context) (default)" {
+		t.Errorf("roundtrip mismatch: %+v", got)
+	}
+	if got.TranscriptMtimeNs != 1234567890 || got.TranscriptSize != 9999 {
+		t.Errorf("mtime/size mismatch: %+v", got)
+	}
+}
+
+func TestLoadCacheMissing(t *testing.T) {
+	got, err := loadCache(filepath.Join(t.TempDir(), "nope.json"))
+	if err != nil {
+		t.Errorf("expected nil error for missing, got %v", err)
+	}
+	if got == nil {
+		t.Error("expected zero-value entry, got nil")
+	}
+}
+
+func TestLoadCacheCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadCache(path)
+	if err != nil {
+		t.Errorf("expected nil error for corrupt, got %v", err)
+	}
+	if got == nil || got.Effort != "" {
+		t.Errorf("expected empty entry, got %+v", got)
+	}
+}
+
+func TestSaveCacheAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "atomic.json")
+	c := &CacheEntry{Effort: "high"}
+	if err := saveCache(path, c); err != nil {
+		t.Fatal(err)
+	}
+	// .tmp file should not be left behind
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("tmp file should be cleaned up after rename, got: %v", err)
 	}
 }
