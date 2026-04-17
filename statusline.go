@@ -414,6 +414,26 @@ func saveCache(path string, c *CacheEntry) error {
 	return os.Rename(tmp, path)
 }
 
+// ==== SECTION: SETTINGS FALLBACK ====
+
+func readSettingsEffort(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var s struct {
+		EffortLevel string `json:"effortLevel"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		return ""
+	}
+	return s.EffortLevel
+}
+
+func defaultSettingsPath() string {
+	return filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {

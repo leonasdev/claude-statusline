@@ -434,3 +434,33 @@ func TestSaveCacheAtomic(t *testing.T) {
 		t.Errorf("tmp file should be cleaned up after rename, got: %v", err)
 	}
 }
+
+func TestReadSettingsEffort(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte(`{"effortLevel":"xhigh","other":"x"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := readSettingsEffort(path)
+	if got != "xhigh" {
+		t.Errorf("got %q, want xhigh", got)
+	}
+}
+
+func TestReadSettingsEffortMissing(t *testing.T) {
+	got := readSettingsEffort(filepath.Join(t.TempDir(), "nope.json"))
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestReadSettingsEffortNoField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte(`{"other":"x"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSettingsEffort(path); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
