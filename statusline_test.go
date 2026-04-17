@@ -206,3 +206,44 @@ func TestModelDisplay(t *testing.T) {
 		})
 	}
 }
+
+func TestContextPercent(t *testing.T) {
+	tests := []struct {
+		usedPct float64
+		want    string
+	}{
+		{0, "Ctx: 0.0%"},
+		{4, "Ctx: 5.0%"},   // 4 / 0.8 = 5
+		{8, "Ctx: 10.0%"},
+		{40, "Ctx: 50.0%"},
+		{80, "Ctx: 100.0%"},
+		{4.48, "Ctx: 5.6%"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := contextDisplay(tt.usedPct); got != tt.want {
+				t.Errorf("contextDisplay(%v) = %q, want %q", tt.usedPct, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCacheHitDisplay(t *testing.T) {
+	tests := []struct {
+		input, read, creation int
+		want                  string
+	}{
+		{1000, 0, 0, "Cache: 0%"},
+		{1000, 3000, 0, "Cache: 75%"},
+		{1000, 2000, 1000, "Cache: 50%"},
+		{0, 0, 0, "Cache: -"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := cacheHitDisplay(tt.input, tt.read, tt.creation); got != tt.want {
+				t.Errorf("cacheHitDisplay(%d, %d, %d) = %q, want %q",
+					tt.input, tt.read, tt.creation, got, tt.want)
+			}
+		})
+	}
+}

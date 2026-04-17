@@ -231,6 +231,22 @@ func modelDisplay(name string) string {
 	return name
 }
 
+// ==== SECTION: CTX/CACHE ====
+
+func contextDisplay(usedPct float64) string {
+	pct := usedPct / 0.8
+	return fmt.Sprintf("Ctx: %.1f%%", pct)
+}
+
+func cacheHitDisplay(input, cacheRead, cacheCreation int) string {
+	denom := input + cacheRead + cacheCreation
+	if denom == 0 {
+		return "Cache: -"
+	}
+	pct := float64(cacheRead) / float64(denom) * 100.0
+	return fmt.Sprintf("Cache: %d%%", int(pct))
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {
