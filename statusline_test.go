@@ -322,6 +322,60 @@ func TestExtractModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestExtractModelVariants(t *testing.T) {
+	tests := []struct {
+		name, line, wantModel, wantEffort string
+	}{
+		{
+			name:       "bare model",
+			line:       `{"content":"<local-command-stdout>Set model to Opus 4.7 (1M context) (default)</local-command-stdout>"}`,
+			wantModel:  "Opus 4.7 (1M context) (default)",
+			wantEffort: "",
+		},
+		{
+			name:       "model with effort",
+			line:       `{"content":"<local-command-stdout>Set model to Opus 4.7 (1M context) with xhigh effort</local-command-stdout>"}`,
+			wantModel:  "Opus 4.7 (1M context)",
+			wantEffort: "xhigh",
+		},
+		{
+			name:       "model with billing trailer (no effort)",
+			line:       `{"content":"<local-command-stdout>Set model to Sonnet 4.6 (1M context) · Billed as extra usage</local-command-stdout>"}`,
+			wantModel:  "Sonnet 4.6 (1M context)",
+			wantEffort: "",
+		},
+		{
+			name:       "model with effort and billing trailer",
+			line:       `{"content":"<local-command-stdout>Set model to Sonnet 4.6 (1M context) with max effort · Billed as extra usage</local-command-stdout>"}`,
+			wantModel:  "Sonnet 4.6 (1M context)",
+			wantEffort: "max",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model, effort := extractLatestModelSet(tt.line)
+			if model != tt.wantModel || effort != tt.wantEffort {
+				t.Errorf("got (model=%q, effort=%q), want (model=%q, effort=%q)",
+					model, effort, tt.wantModel, tt.wantEffort)
+			}
+		})
+	}
+}
+
+func TestExtractModelLatestVariantWins(t *testing.T) {
+	// Simulates real session: Sonnet+max → bare Opus. Latest (bare Opus) must win.
+	in := `{"content":"<local-command-stdout>Set model to Sonnet 4.6 (1M context) with max effort · Billed as extra usage</local-command-stdout>"}` +
+		"\n" +
+		`{"content":"<local-command-stdout>Set model to Opus 4.7 (1M context) (default)</local-command-stdout>"}`
+	model, effort := extractLatestModelSet(in)
+	if model != "Opus 4.7 (1M context) (default)" {
+		t.Errorf("latest model = %q, want Opus", model)
+	}
+	if effort != "" {
+		t.Errorf("latest effort should be empty (bare line), got %q", effort)
+	}
+}
+
 func TestExtractModelFalsePositive(t *testing.T) {
 	// Prose containing the phrase wrapped in escaped quotes must NOT match
 	in := `the regex \"content\":\"<local-command-stdout>Set model to FAKE with bad effort\" was here`

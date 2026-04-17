@@ -273,8 +273,14 @@ var (
 	// sequence at the start of a CC slash-command output entry's content
 	// field. Prose mentioning the same strings is wrapped in JSON-escaped
 	// quotes (`\"content\":\"`) so won't match.
-	effortRE    = regexp.MustCompile(`"content":"<local-command-stdout>Set effort level to (\S+?)[: (]`)
-	modelSetRE  = regexp.MustCompile(`"content":"<local-command-stdout>Set model to (.+?) with (\S+) effort`)
+	effortRE = regexp.MustCompile(`"content":"<local-command-stdout>Set effort level to (\S+?)[: (]`)
+	// "Set model to <model>" handles four variants observed in real CC output:
+	//   Set model to X
+	//   Set model to X with Y effort
+	//   Set model to X · Billed as extra usage
+	//   Set model to X with Y effort · Billed as extra usage
+	// Captures: 1=model name, 2=effort (may be empty if "with ... effort" is absent)
+	modelSetRE  = regexp.MustCompile(`"content":"<local-command-stdout>Set model to (.+?)(?: with (\S+) effort)?(?: ·[^<]*?)?</local-command-stdout>`)
 	keptModelRE = regexp.MustCompile(`"content":"<local-command-stdout>Kept model as (.+?)</local-command-stdout>`)
 )
 
