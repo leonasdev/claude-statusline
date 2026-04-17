@@ -544,3 +544,33 @@ func TestFitPathNarrowTerm(t *testing.T) {
 		t.Errorf("expected truncated, got %q", got)
 	}
 }
+
+func TestRenderModelSegment(t *testing.T) {
+	got := renderModelSegment("Opus 4.7 (1M context) (default)")
+	want := colorClaudeBold + "Opus 4.7 (1M)" + colorReset
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRenderEffortSegment(t *testing.T) {
+	got := renderEffortSegment("xhigh")
+	want := colorLightBlack + "◉ xhigh" + colorReset
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRenderGitSegmentEmpty(t *testing.T) {
+	if got := renderGitSegment("", 0, 0, 0); got != "" {
+		t.Errorf("git with no branch should be empty, got %q", got)
+	}
+}
+
+func TestRenderGitSegment(t *testing.T) {
+	got := renderGitSegment("main", 3, 8, 2)
+	want := colorLightYellow + "\ue0a0 main ?3 ~8 -2" + colorReset
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

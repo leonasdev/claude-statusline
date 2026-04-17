@@ -536,6 +536,52 @@ func detectWidth() int {
 	return widthFallback
 }
 
+// ==== SECTION: SEGMENT RENDERERS ====
+
+func renderPathSegment(cwd string, budget int) string {
+	home := os.Getenv("HOME")
+	displayed := substituteHome(cwd, home)
+	return colorize(fitPath(displayed, budget), colorNone)
+	// path uses default fg (no color override)
+}
+
+func renderGitSegment(branch string, untracked, modified, deleted int) string {
+	raw := formatGit(branch, untracked, modified, deleted)
+	if raw == "" {
+		return ""
+	}
+	return colorize(raw, colorLightYellow)
+}
+
+func renderModelSegment(name string) string {
+	return colorize(modelDisplay(name), colorClaudeBold)
+}
+
+func renderEffortSegment(level string) string {
+	return colorize(effortDisplay(level), colorLightBlack)
+}
+
+func renderContextSegment(usedPct float64) string {
+	return colorize(contextDisplay(usedPct), colorLightBlack)
+}
+
+func renderCacheSegment(input, cacheRead, cacheCreation int) string {
+	return colorize(cacheHitDisplay(input, cacheRead, cacheCreation), colorLightBlack)
+}
+
+func renderSessionSegment(pct float64) string {
+	bar := renderBar(pct, 16)
+	return colorize(fmt.Sprintf("Session: [%s] %.1f%%", bar, pct), colorLightBlack)
+}
+
+func renderResetSegment(resetsAt int64, now int64) string {
+	remain := resetsAt - now
+	if remain < 0 {
+		remain = 0
+	}
+	return colorize("Reset: "+formatDuration(remain), colorLightBlack)
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {
