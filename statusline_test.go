@@ -574,3 +574,25 @@ func TestRenderGitSegment(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestJoinSegments(t *testing.T) {
+	sep := colorize(" │ ", colorLightBlack)
+	tests := []struct {
+		name     string
+		segments []string
+		want     string
+	}{
+		{"all empty", []string{}, ""},
+		{"one", []string{"a"}, "a"},
+		{"two", []string{"a", "b"}, "a" + sep + "b"},
+		{"with empty middle", []string{"a", "", "c"}, "a" + sep + "c"},
+		{"with empty start", []string{"", "b"}, "b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := joinSegments(tt.segments); got != tt.want {
+				t.Errorf("joinSegments = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

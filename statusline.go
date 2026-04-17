@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -582,6 +583,22 @@ func renderResetSegment(resetsAt int64, now int64) string {
 	return colorize("Reset: "+formatDuration(remain), colorLightBlack)
 }
 
+func joinSegments(parts []string) string {
+	sep := colorize(" │ ", colorLightBlack)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, sep)
+}
+
+// visibleLen returns rune count excluding ANSI escapes.
+func visibleLen(s string) int {
+	return len([]rune(stripANSI(s)))
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {
@@ -597,6 +614,108 @@ func main() {
 		fmt.Fprintln(os.Stderr, "parse stdin:", err)
 		return
 	}
-	_ = in
-	fmt.Print("")
+
+	width := detectWidth()
+
+	// Resolve effort + model with sidecar cache
+	cachePathStr := cachePath(in.SessionID)
+	cache, _ := loadCache(cachePathStr)
+	effort, model := resolveEffortAndModel(in, cache)
+	cacheChanged := updateCache(cache, in, effort, model)
+
+	// Render non-path segments first to compute their total width
+	gitBranch, gitU, gitM, gitD := runGitInfo(in.Workspace.CurrentDir)
+
+	gitSeg := renderGitSegment(gitBranch, gitU, gitM, gitD)
+	modelSeg := renderModelSegment(model)
+	effortSeg := renderEffortSegment(effort)
+	ctxSeg := renderContextSegment(in.ContextWindow.UsedPercentage)
+	cacheSeg := renderCacheSegment(
+		in.ContextWindow.CurrentUsage.InputTokens,
+		in.ContextWindow.CurrentUsage.CacheReadInputTokens,
+		in.ContextWindow.CurrentUsage.CacheCreationInputTokens,
+	)
+	sessSeg := renderSessionSegment(in.RateLimits.FiveHour.UsedPercentage)
+	resetSeg := renderResetSegment(in.RateLimits.FiveHour.ResetsAt, time.Now().Unix())
+
+	// Compute path budget. visibleLen counts characters excluding ANSI escapes.
+	otherSegs := []string{gitSeg, modelSeg, effortSeg, ctxSeg, cacheSeg, sessSeg, resetSeg}
+	otherWidth := 0
+	nonEmpty := 0
+	for _, s := range otherSegs {
+		if s == "" {
+			continue
+		}
+		otherWidth += visibleLen(s)
+		nonEmpty++
+	}
+	// separators are " │ " (3 visible chars) between path and the rest
+	// total separators = (number of visible segments incl. path) - 1
+	if nonEmpty > 0 {
+		otherWidth += 3 * nonEmpty // separator between path & first non-empty + between others
+	}
+
+	pathBudget := width - otherWidth
+	if pathBudget < 1 {
+		pathBudget = 1
+	}
+	pathSeg := renderPathSegment(in.Workspace.CurrentDir, pathBudget)
+
+	out := joinSegments(append([]string{pathSeg}, otherSegs...))
+	fmt.Print(out)
+
+	if cacheChanged {
+		_ = saveCache(cachePathStr, cache)
+	}
+}
+
+// resolveEffortAndModel walks: cache → transcript scan → settings/Input fallbacks.
+func resolveEffortAndModel(in *Input, cache *CacheEntry) (effort, model string) {
+	stat, err := os.Stat(in.TranscriptPath)
+	if err == nil &&
+		stat.ModTime().UnixNano() == cache.TranscriptMtimeNs &&
+		stat.Size() == cache.TranscriptSize &&
+		(cache.Effort != "" || cache.Model != "") {
+		return cache.Effort, cache.Model
+	}
+
+	if in.TranscriptPath != "" {
+		eff, mod, _ := scanTranscript(in.TranscriptPath)
+		effort = eff
+		model = mod
+	}
+
+	if effort == "" {
+		effort = readSettingsEffort(defaultSettingsPath())
+	}
+	if effort == "" {
+		effort = "high"
+	}
+	if model == "" {
+		model = in.Model.DisplayName
+	}
+	return effort, model
+}
+
+func updateCache(cache *CacheEntry, in *Input, effort, model string) bool {
+	changed := false
+	if cache.Effort != effort {
+		cache.Effort = effort
+		changed = true
+	}
+	if cache.Model != model {
+		cache.Model = model
+		changed = true
+	}
+	stat, err := os.Stat(in.TranscriptPath)
+	if err == nil {
+		ns := stat.ModTime().UnixNano()
+		sz := stat.Size()
+		if cache.TranscriptMtimeNs != ns || cache.TranscriptSize != sz {
+			cache.TranscriptMtimeNs = ns
+			cache.TranscriptSize = sz
+			changed = true
+		}
+	}
+	return changed
 }
