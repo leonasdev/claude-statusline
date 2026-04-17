@@ -9,11 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/term"
 )
 
 // ==== SECTION: INPUT TYPES ====
@@ -63,6 +60,7 @@ const (
 	colorLightBlack  = "\x1b[90m"
 	colorClaudeBold  = "\x1b[1;38;2;217;119;87m"
 	colorNone        = ""
+	colorDefaultFg   = "\x1b[39m" // explicit "default foreground" — overrides any ambient color
 )
 
 func colorize(s, color string) string {
@@ -171,10 +169,14 @@ func abbreviatePath(path string, level int) string {
 	}
 }
 
-func fitPath(path string, budget int) string {
+// pathThreshold caps path display length. Paths above this get progressively
+// abbreviated. Independent of terminal width — set the value you find readable.
+const pathThreshold = 40
+
+func fitPath(path string) string {
 	for level := 0; level <= 4; level++ {
 		v := abbreviatePath(path, level)
-		if len([]rune(v)) <= budget {
+		if len([]rune(v)) <= pathThreshold {
 			return v
 		}
 	}
@@ -555,43 +557,15 @@ func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
 	return branch, u, m, d
 }
 
-// ==== SECTION: WIDTH ====
-
-const widthFallback = 120
-
-func detectWidth() int {
-	// 1. /dev/tty — always reflects the current controlling terminal size,
-	//    regardless of how stdin/stdout/stderr were redirected by CC.
-	if f, err := os.OpenFile("/dev/tty", os.O_RDONLY, 0); err == nil {
-		w, _, gerr := term.GetSize(int(f.Fd()))
-		f.Close()
-		if gerr == nil && w > 0 {
-			return w
-		}
-	}
-	// 2. ioctl on stderr / stdout / stdin in case /dev/tty wasn't accessible
-	for _, fd := range []int{int(os.Stderr.Fd()), int(os.Stdout.Fd()), int(os.Stdin.Fd())} {
-		if w, _, err := term.GetSize(fd); err == nil && w > 0 {
-			return w
-		}
-	}
-	// 3. COLUMNS env var (often stale because CC sets it once at startup)
-	if v := os.Getenv("COLUMNS"); v != "" {
-		if w, err := strconv.Atoi(v); err == nil && w > 0 {
-			return w
-		}
-	}
-	// 4. fallback
-	return widthFallback
-}
 
 // ==== SECTION: SEGMENT RENDERERS ====
 
-func renderPathSegment(cwd string, budget int) string {
+func renderPathSegment(cwd string) string {
 	home := os.Getenv("HOME")
 	displayed := substituteHome(cwd, home)
-	return colorize(fitPath(displayed, budget), colorNone)
-	// path uses default fg (no color override)
+	// Wrap with colorDefaultFg so ambient colors (e.g. CC's TUI chrome ahead
+	// of the statusline) don't bleed through and tint the path light_black.
+	return colorize(fitPath(displayed), colorDefaultFg)
 }
 
 func renderGitSegment(branch string, untracked, modified, deleted int) string {
@@ -606,7 +580,35 @@ func renderModelSegment(name string) string {
 	return colorize(modelDisplay(name), colorClaudeBold)
 }
 
-func renderEffortSegment(level string) string {
+// modelDefaultEffort maps a model family to its effort level when /effort=auto.
+// Updated based on observed CC behavior; tweak when official defaults change.
+var modelDefaultEffort = map[string]string{
+	"Opus":   "xhigh",
+	"Sonnet": "medium",
+}
+
+// defaultEffortFor returns the model's default effort, or "high" if unknown.
+func defaultEffortFor(model string) string {
+	for prefix, eff := range modelDefaultEffort {
+		if strings.Contains(model, prefix) {
+			return eff
+		}
+	}
+	return "high"
+}
+
+// modelHasNoEffort returns true for models that don't support effort levels.
+func modelHasNoEffort(model string) bool {
+	return strings.Contains(model, "Haiku")
+}
+
+func renderEffortSegment(level, model string) string {
+	if modelHasNoEffort(model) {
+		return ""
+	}
+	if level == "auto" {
+		level = defaultEffortFor(model)
+	}
 	return colorize(effortDisplay(level), colorLightBlack)
 }
 
@@ -642,11 +644,6 @@ func joinSegments(parts []string) string {
 	return strings.Join(out, sep)
 }
 
-// visibleLen returns rune count excluding ANSI escapes.
-func visibleLen(s string) int {
-	return len([]rune(stripANSI(s)))
-}
-
 // ==== SECTION: MAIN ====
 
 func main() {
@@ -663,20 +660,18 @@ func main() {
 		return
 	}
 
-	width := detectWidth()
-
 	// Resolve effort + model with sidecar cache
 	cachePathStr := cachePath(in.SessionID)
 	cache, _ := loadCache(cachePathStr)
 	effort, model := resolveEffortAndModel(in, cache)
 	cacheChanged := updateCache(cache, in, effort, model)
 
-	// Render non-path segments first to compute their total width
 	gitBranch, gitU, gitM, gitD := runGitInfo(in.Workspace.CurrentDir)
 
+	pathSeg := renderPathSegment(in.Workspace.CurrentDir)
 	gitSeg := renderGitSegment(gitBranch, gitU, gitM, gitD)
 	modelSeg := renderModelSegment(model)
-	effortSeg := renderEffortSegment(effort)
+	effortSeg := renderEffortSegment(effort, model)
 	ctxSeg := renderContextSegment(in.ContextWindow.UsedPercentage)
 	cacheSeg := renderCacheSegment(
 		in.ContextWindow.CurrentUsage.InputTokens,
@@ -686,30 +681,7 @@ func main() {
 	sessSeg := renderSessionSegment(in.RateLimits.FiveHour.UsedPercentage)
 	resetSeg := renderResetSegment(in.RateLimits.FiveHour.ResetsAt, time.Now().Unix())
 
-	// Compute path budget. visibleLen counts characters excluding ANSI escapes.
-	otherSegs := []string{gitSeg, modelSeg, effortSeg, ctxSeg, cacheSeg, sessSeg, resetSeg}
-	otherWidth := 0
-	nonEmpty := 0
-	for _, s := range otherSegs {
-		if s == "" {
-			continue
-		}
-		otherWidth += visibleLen(s)
-		nonEmpty++
-	}
-	// separators are " │ " (3 visible chars) between path and the rest
-	// total separators = (number of visible segments incl. path) - 1
-	if nonEmpty > 0 {
-		otherWidth += 3 * nonEmpty // separator between path & first non-empty + between others
-	}
-
-	pathBudget := width - otherWidth
-	if pathBudget < 1 {
-		pathBudget = 1
-	}
-	pathSeg := renderPathSegment(in.Workspace.CurrentDir, pathBudget)
-
-	out := joinSegments(append([]string{pathSeg}, otherSegs...))
+	out := joinSegments([]string{pathSeg, gitSeg, modelSeg, effortSeg, ctxSeg, cacheSeg, sessSeg, resetSeg})
 	fmt.Print(out)
 
 	if cacheChanged {

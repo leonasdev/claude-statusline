@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -637,33 +636,23 @@ func TestFormatGit(t *testing.T) {
 }
 
 func TestFitPath(t *testing.T) {
-	path := "~/projects/test-projects/project-1"
 	tests := []struct {
-		budget int
-		want   string
+		name, path, want string
 	}{
-		{50, "~/projects/test-projects/project-1"},     // l0
-		{30, "~/p/test-projects/project-1"},             // l1
-		{20, "~/p/t/project-1"},                          // l2
-		{12, "…/project-1"},                              // l3
-		{2, "…1"},                                        // l4
+		// pathThreshold = 40
+		{"short stays full", "~/short", "~/short"},
+		{"exactly threshold (40 chars) stays full", "~/aaaaaaaaaa/bbbbbbbbbb/cccccccc/dddd", "~/aaaaaaaaaa/bbbbbbbbbb/cccccccc/dddd"},
+		{"over threshold abbreviates first parent", "~/projects/test-projects/cool-project-name", "~/p/test-projects/cool-project-name"},
+		{"long enough to need fish-style", "~/very/long/path/to/some/deeply/nested/source/file", "~/v/l/p/t/s/d/n/s/file"},
+		{"empty stays sentinel", "", "?"},
 	}
 	for _, tt := range tests {
-		t.Run(fmt.Sprint(tt.budget), func(t *testing.T) {
-			got := fitPath(path, tt.budget)
+		t.Run(tt.name, func(t *testing.T) {
+			got := fitPath(tt.path)
 			if got != tt.want {
-				t.Errorf("fitPath(%q, %d) = %q, want %q", path, tt.budget, got, tt.want)
+				t.Errorf("fitPath(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestFitPathNarrowTerm(t *testing.T) {
-	// Real width-budget can be tiny; ensure level 4 returns something
-	got := fitPath("~/very/long/deep/leaf-name", 5)
-	if len(got) > 5 && got != "…/leaf-name" {
-		// must end up at level 3 or 4
-		t.Errorf("expected truncated, got %q", got)
 	}
 }
 
@@ -676,10 +665,41 @@ func TestRenderModelSegment(t *testing.T) {
 }
 
 func TestRenderEffortSegment(t *testing.T) {
-	got := renderEffortSegment("xhigh")
+	got := renderEffortSegment("xhigh", "Opus 4.7 (1M)")
 	want := colorLightBlack + "◉ xhigh" + colorReset
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRenderEffortSegmentHaikuHidden(t *testing.T) {
+	if got := renderEffortSegment("xhigh", "Haiku 4.5"); got != "" {
+		t.Errorf("Haiku should hide effort, got %q", got)
+	}
+}
+
+func TestRenderEffortSegmentAutoOpus(t *testing.T) {
+	got := renderEffortSegment("auto", "Opus 4.7 (1M)")
+	want := colorLightBlack + "◉ xhigh" + colorReset
+	if got != want {
+		t.Errorf("auto on Opus = %q, want %q", got, want)
+	}
+}
+
+func TestRenderEffortSegmentAutoSonnet(t *testing.T) {
+	got := renderEffortSegment("auto", "Sonnet 4.6 (1M)")
+	want := colorLightBlack + "◐ medium" + colorReset
+	if got != want {
+		t.Errorf("auto on Sonnet = %q, want %q", got, want)
+	}
+}
+
+func TestRenderEffortSegmentAutoUnknown(t *testing.T) {
+	// Unknown model defaults to "high" (safe fallback)
+	got := renderEffortSegment("auto", "FutureModel 5.0")
+	want := colorLightBlack + "● high" + colorReset
+	if got != want {
+		t.Errorf("auto unknown = %q, want %q", got, want)
 	}
 }
 
