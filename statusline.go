@@ -60,7 +60,6 @@ const (
 	colorLightBlack  = "\x1b[90m"
 	colorClaudeBold  = "\x1b[1;38;2;217;119;87m"
 	colorNone        = ""
-	colorDefaultFg   = "\x1b[39m" // explicit "default foreground" — overrides any ambient color
 )
 
 func colorize(s, color string) string {
@@ -276,7 +275,11 @@ var (
 	// sequence at the start of a CC slash-command output entry's content
 	// field. Prose mentioning the same strings is wrapped in JSON-escaped
 	// quotes (`\"content\":\"`) so won't match.
-	effortRE = regexp.MustCompile(`"content":"<local-command-stdout>Set effort level to (\S+?)[: (]`)
+	// Two CC output formats observed:
+	//   "Set effort level to X: description" — for explicit levels (low/medium/high/xhigh/max)
+	//   "Effort level set to auto"           — for auto (no description, terminated by '<')
+	// Group 1 captures the old format, group 2 captures the new format.
+	effortRE = regexp.MustCompile(`"content":"<local-command-stdout>(?:Set effort level to (\S+?)[: (]|Effort level set to (\S+?)<)`)
 	// "Set model to <model>" handles four variants observed in real CC output:
 	//   Set model to X
 	//   Set model to X with Y effort
@@ -292,12 +295,17 @@ func stripANSI(s string) string {
 }
 
 // Find the LAST (rightmost) match of effortRE in s. Returns "" if none.
+// Picks whichever capture group (old vs new format) is non-empty.
 func extractLatestEffort(s string) string {
 	matches := effortRE.FindAllStringSubmatch(s, -1)
 	if len(matches) == 0 {
 		return ""
 	}
-	return matches[len(matches)-1][1]
+	last := matches[len(matches)-1]
+	if last[1] != "" {
+		return last[1]
+	}
+	return last[2]
 }
 
 // Find the last "Set model to ... with X effort" match. Returns ("", "") if none.
@@ -331,7 +339,15 @@ func extractLatestState(s string) (effort, model string) {
 	var events []event
 
 	for _, m := range effortRE.FindAllStringSubmatchIndex(s, -1) {
-		events = append(events, event{pos: m[1], effort: s[m[2]:m[3]]})
+		// effortRE has two capture groups (old/new format); pick whichever matched
+		var val string
+		switch {
+		case m[2] >= 0:
+			val = s[m[2]:m[3]]
+		case len(m) > 5 && m[4] >= 0:
+			val = s[m[4]:m[5]]
+		}
+		events = append(events, event{pos: m[1], effort: val})
 	}
 	for _, m := range modelSetRE.FindAllStringSubmatchIndex(s, -1) {
 		ev := event{pos: m[1], model: s[m[2]:m[3]]}
@@ -563,9 +579,10 @@ func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
 func renderPathSegment(cwd string) string {
 	home := os.Getenv("HOME")
 	displayed := substituteHome(cwd, home)
-	// Wrap with colorDefaultFg so ambient colors (e.g. CC's TUI chrome ahead
-	// of the statusline) don't bleed through and tint the path light_black.
-	return colorize(fitPath(displayed), colorDefaultFg)
+	// Wrap with full ANSI reset on both ends so ambient attributes set by
+	// CC's TUI chrome (color, dim, bold, etc.) don't bleed into the path.
+	// `\x1b[39m` alone only resets foreground color and leaves dim intact.
+	return colorize(fitPath(displayed), colorReset)
 }
 
 func renderGitSegment(branch string, untracked, modified, deleted int) string {

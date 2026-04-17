@@ -310,6 +310,23 @@ func TestExtractEffortLatestWins(t *testing.T) {
 	}
 }
 
+func TestExtractEffortAutoFormat(t *testing.T) {
+	// Real CC output for `/effort auto` — different word order, no description
+	in := `{"content":"<local-command-stdout>Effort level set to auto</local-command-stdout>"}`
+	if got := extractLatestEffort(in); got != "auto" {
+		t.Errorf("got %q, want auto", got)
+	}
+}
+
+func TestExtractEffortAutoLatestOverridesOldFormat(t *testing.T) {
+	// User runs /effort low, then /effort auto. Auto should win.
+	in := realEffortLine("low") + "\n" +
+		`{"content":"<local-command-stdout>Effort level set to auto</local-command-stdout>"}`
+	if got := extractLatestEffort(in); got != "auto" {
+		t.Errorf("got %q, want auto (latest)", got)
+	}
+}
+
 func TestExtractModelAndEffort(t *testing.T) {
 	in := realModelSetLine("Opus 4.7 (1M context) (default)", "xhigh")
 	model, effort := extractLatestModelSet(in)
