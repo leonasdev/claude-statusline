@@ -269,17 +269,34 @@ func TestStripANSI(t *testing.T) {
 	}
 }
 
+// realEffortLine returns the byte sequence as it appears in a real CC
+// transcript JSONL entry for a /effort output (verified against actual file).
+func realEffortLine(level string) string {
+	return `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to ` + level + `: ...</local-command-stdout>"}}`
+}
+
+func realModelSetLine(model, level string) string {
+	return `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to ` + model + ` with ` + level + ` effort</local-command-stdout>"}}`
+}
+
+func realKeptModelLine(model string) string {
+	return `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Kept model as ` + model + `</local-command-stdout>"}}`
+}
+
 func TestExtractEffort(t *testing.T) {
 	tests := []struct {
-		in, want string
+		name, in, want string
 	}{
-		{"Set effort level to xhigh: deeper reasoning", "xhigh"},
-		{"Set effort level to max (this session only): max blah", "max"},
-		{"random other line", ""},
-		{"Set effort level to high: some text", "high"},
+		{"xhigh", realEffortLine("xhigh"), "xhigh"},
+		{"max with parens", `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to max (this session only): max blah</local-command-stdout>"}}`, "max"},
+		{"random", "random other line", ""},
+		{"high", realEffortLine("high"), "high"},
+		// FALSE POSITIVE GUARDS — patterns appearing in prose (escaped quotes) must NOT match
+		{"prose escaped", `the spec says \"content\":\"<local-command-stdout>Set effort level to xhigh: ...\"}`, ""},
+		{"prose plain", "in the spec we say `Set effort level to xhigh:` is the pattern", ""},
 	}
 	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			if got := extractLatestEffort(tt.in); got != tt.want {
 				t.Errorf("extractLatestEffort(%q) = %q, want %q", tt.in, got, tt.want)
 			}
@@ -288,14 +305,14 @@ func TestExtractEffort(t *testing.T) {
 }
 
 func TestExtractEffortLatestWins(t *testing.T) {
-	in := "Set effort level to low: x\nSet effort level to xhigh: y"
+	in := realEffortLine("low") + "\n" + realEffortLine("xhigh")
 	if got := extractLatestEffort(in); got != "xhigh" {
 		t.Errorf("latest = %q, want xhigh", got)
 	}
 }
 
 func TestExtractModelAndEffort(t *testing.T) {
-	in := "Set model to Opus 4.7 (1M context) (default) with xhigh effort"
+	in := realModelSetLine("Opus 4.7 (1M context) (default)", "xhigh")
 	model, effort := extractLatestModelSet(in)
 	if model != "Opus 4.7 (1M context) (default)" {
 		t.Errorf("model = %q", model)
@@ -305,17 +322,27 @@ func TestExtractModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestExtractModelFalsePositive(t *testing.T) {
+	// Prose containing the phrase wrapped in escaped quotes must NOT match
+	in := `the regex \"content\":\"<local-command-stdout>Set model to FAKE with bad effort\" was here`
+	model, effort := extractLatestModelSet(in)
+	if model != "" || effort != "" {
+		t.Errorf("false positive: model=%q effort=%q (should be empty)", model, effort)
+	}
+}
+
 func TestExtractKeptModel(t *testing.T) {
-	in := "Kept model as Opus 4.7 (1M context) (default)</local-command-stdout>"
+	in := realKeptModelLine("Opus 4.7 (1M context) (default)")
 	if got := extractLatestKeptModel(in); got != "Opus 4.7 (1M context) (default)" {
 		t.Errorf("kept = %q", got)
 	}
 }
 
-func TestExtractKeptModelEOL(t *testing.T) {
-	in := "Kept model as Sonnet 4.6"
-	if got := extractLatestKeptModel(in); got != "Sonnet 4.6" {
-		t.Errorf("kept = %q", got)
+func TestExtractKeptModelFalsePositive(t *testing.T) {
+	// Escaped-quote prose must NOT match
+	in := `the \"content\":\"<local-command-stdout>Kept model as FAKE</local-command-stdout>\" pattern`
+	if got := extractLatestKeptModel(in); got != "" {
+		t.Errorf("false positive: %q (should be empty)", got)
 	}
 }
 
@@ -497,11 +524,11 @@ func TestFormatGit(t *testing.T) {
 		untracked, modified, deleted int
 		want                         string
 	}{
-		{"main", 0, 0, 0, "\ue0a0 main"},
-		{"master", 3, 0, 0, "\ue0a0 master ?3"},
-		{"feat/x", 0, 8, 0, "\ue0a0 feat/x ~8"},
-		{"main", 0, 0, 2, "\ue0a0 main -2"},
-		{"main", 3, 8, 2, "\ue0a0 main ?3 ~8 -2"},
+		{"main", 0, 0, 0, "\ue725 main"},
+		{"master", 3, 0, 0, "\ue725 master ?3"},
+		{"feat/x", 0, 8, 0, "\ue725 feat/x ~8"},
+		{"main", 0, 0, 2, "\ue725 main -2"},
+		{"main", 3, 8, 2, "\ue725 main ?3 ~8 -2"},
 		{"", 0, 0, 0, ""},
 	}
 	for _, tt := range tests {
@@ -569,7 +596,7 @@ func TestRenderGitSegmentEmpty(t *testing.T) {
 
 func TestRenderGitSegment(t *testing.T) {
 	got := renderGitSegment("main", 3, 8, 2)
-	want := colorLightYellow + "\ue0a0 main ?3 ~8 -2" + colorReset
+	want := colorLightYellow + "\ue725 main ?3 ~8 -2" + colorReset
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

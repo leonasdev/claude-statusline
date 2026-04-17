@@ -1,2 +1,3 @@
 {"type":"permission-mode","permissionMode":"auto","sessionId":"x"}
-{"type":"user","content":"<command-name>/effort</command-name><local-command-stdout>Set effort level to high: just below xhigh</local-command-stdout>"}
+{"type":"user","message":{"role":"user","content":"<command-name>/effort</command-name><command-args></command-args>"}}
+{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to high: just below xhigh</local-command-stdout>"}}

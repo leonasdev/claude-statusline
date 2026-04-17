@@ -268,10 +268,14 @@ func cacheHitDisplay(input, cacheRead, cacheCreation int) string {
 
 var (
 	// Match raw ESC byte OR JSON-escaped \u001b form (transcripts use the latter)
-	ansiRE       = regexp.MustCompile(`(\x1b|\\u001b)\[[0-9;]*m`)
-	effortRE     = regexp.MustCompile(`Set effort level to (\S+?)[: (]`)
-	modelSetRE   = regexp.MustCompile(`Set model to (.+?) with (\S+) effort`)
-	keptModelRE  = regexp.MustCompile(`Kept model as (.+?)(?:</|\n|$)`)
+	ansiRE = regexp.MustCompile(`(\x1b|\\u001b)\[[0-9;]*m`)
+	// Anchor to `"content":"<local-command-stdout>` — this is the exact byte
+	// sequence at the start of a CC slash-command output entry's content
+	// field. Prose mentioning the same strings is wrapped in JSON-escaped
+	// quotes (`\"content\":\"`) so won't match.
+	effortRE    = regexp.MustCompile(`"content":"<local-command-stdout>Set effort level to (\S+?)[: (]`)
+	modelSetRE  = regexp.MustCompile(`"content":"<local-command-stdout>Set model to (.+?) with (\S+) effort`)
+	keptModelRE = regexp.MustCompile(`"content":"<local-command-stdout>Kept model as (.+?)</local-command-stdout>`)
 )
 
 func stripANSI(s string) string {
@@ -415,7 +419,7 @@ func loadCache(path string) (*CacheEntry, error) {
 }
 
 func saveCache(path string, c *CacheEntry) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	data, err := json.Marshal(c)
@@ -423,7 +427,7 @@ func saveCache(path string, c *CacheEntry) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -451,7 +455,7 @@ func defaultSettingsPath() string {
 
 // ==== SECTION: GIT ====
 
-const gitBranchIcon = "\ue0a0" //
+const gitBranchIcon = "" //
 
 func parsePorcelain(raw string) (untracked, modified, deleted int) {
 	for _, line := range strings.Split(raw, "\n") {
