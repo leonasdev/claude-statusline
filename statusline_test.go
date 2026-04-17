@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -510,5 +511,36 @@ func TestFormatGit(t *testing.T) {
 				t.Errorf("formatGit = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFitPath(t *testing.T) {
+	path := "~/projects/test-projects/project-1"
+	tests := []struct {
+		budget int
+		want   string
+	}{
+		{50, "~/projects/test-projects/project-1"},     // l0
+		{30, "~/p/test-projects/project-1"},             // l1
+		{20, "~/p/t/project-1"},                          // l2
+		{12, "…/project-1"},                              // l3
+		{2, "…1"},                                        // l4
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.budget), func(t *testing.T) {
+			got := fitPath(path, tt.budget)
+			if got != tt.want {
+				t.Errorf("fitPath(%q, %d) = %q, want %q", path, tt.budget, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFitPathNarrowTerm(t *testing.T) {
+	// Real width-budget can be tiny; ensure level 4 returns something
+	got := fitPath("~/very/long/deep/leaf-name", 5)
+	if len(got) > 5 && got != "…/leaf-name" {
+		// must end up at level 3 or 4
+		t.Errorf("expected truncated, got %q", got)
 	}
 }

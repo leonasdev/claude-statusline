@@ -169,6 +169,16 @@ func abbreviatePath(path string, level int) string {
 	}
 }
 
+func fitPath(path string, budget int) string {
+	for level := 0; level <= 4; level++ {
+		v := abbreviatePath(path, level)
+		if len([]rune(v)) <= budget {
+			return v
+		}
+	}
+	return abbreviatePath(path, 4)
+}
+
 // ==== SECTION: BAR ====
 
 func renderBar(pct float64, width int) string {
