@@ -362,6 +362,47 @@ func TestExtractModelVariants(t *testing.T) {
 	}
 }
 
+func TestExtractLatestState(t *testing.T) {
+	// /effort sets max, then /model with low effort, then /model with high effort.
+	// Effort must track /model's embedded effort (the most recent event),
+	// not stay stuck on the older /effort line.
+	in := realEffortLine("max") + "\n" +
+		realModelSetLine("Opus 4.7 (1M context) (default)", "low") + "\n" +
+		realModelSetLine("Opus 4.7 (1M context) (default)", "high")
+	effort, model := extractLatestState(in)
+	if effort != "high" {
+		t.Errorf("effort = %q, want high (latest embedded in /model)", effort)
+	}
+	if model != "Opus 4.7 (1M context) (default)" {
+		t.Errorf("model = %q", model)
+	}
+}
+
+func TestExtractLatestStateBareModelKeepsEffort(t *testing.T) {
+	// /model with xhigh effort sets both. Later bare /model only updates model,
+	// effort should persist.
+	in := realModelSetLine("Opus 4.7 (1M context) (default)", "xhigh") + "\n" +
+		`{"content":"<local-command-stdout>Set model to Sonnet 4.6 (1M context) · Billed as extra usage</local-command-stdout>"}`
+	effort, model := extractLatestState(in)
+	if effort != "xhigh" {
+		t.Errorf("effort = %q, want xhigh (bare /model doesn't clear effort)", effort)
+	}
+	if model != "Sonnet 4.6 (1M context)" {
+		t.Errorf("model = %q, want Sonnet", model)
+	}
+}
+
+func TestExtractLatestStateKeptModelLatest(t *testing.T) {
+	// Set model sets one, later Kept model as different one — Kept should win
+	// if it's the latest by position (confirms current model).
+	in := realModelSetLine("Sonnet 4.6 (1M context)", "max") + "\n" +
+		realKeptModelLine("Opus 4.7 (1M context) (default)")
+	_, model := extractLatestState(in)
+	if model != "Opus 4.7 (1M context) (default)" {
+		t.Errorf("model = %q, want Opus (latest Kept)", model)
+	}
+}
+
 func TestExtractModelLatestVariantWins(t *testing.T) {
 	// Simulates real session: Sonnet+max → bare Opus. Latest (bare Opus) must win.
 	in := `{"content":"<local-command-stdout>Set model to Sonnet 4.6 (1M context) with max effort · Billed as extra usage</local-command-stdout>"}` +

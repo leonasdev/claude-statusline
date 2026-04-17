@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -316,6 +317,46 @@ func extractLatestKeptModel(s string) string {
 	return matches[len(matches)-1][1]
 }
 
+// extractLatestState replays every effort/model change event in s ordered by
+// position, returning the final (effort, model) state. This handles the case
+// where the most recent change is embedded in a "Set model to X with Y effort"
+// line rather than a standalone "Set effort level to" line.
+func extractLatestState(s string) (effort, model string) {
+	type event struct {
+		pos            int
+		effort, model  string
+	}
+	var events []event
+
+	for _, m := range effortRE.FindAllStringSubmatchIndex(s, -1) {
+		events = append(events, event{pos: m[1], effort: s[m[2]:m[3]]})
+	}
+	for _, m := range modelSetRE.FindAllStringSubmatchIndex(s, -1) {
+		ev := event{pos: m[1], model: s[m[2]:m[3]]}
+		// modelSetRE's second capture (effort) is optional; when absent the
+		// submatch index is -1.
+		if len(m) > 5 && m[4] >= 0 {
+			ev.effort = s[m[4]:m[5]]
+		}
+		events = append(events, ev)
+	}
+	for _, m := range keptModelRE.FindAllStringSubmatchIndex(s, -1) {
+		events = append(events, event{pos: m[1], model: s[m[2]:m[3]]})
+	}
+
+	sort.Slice(events, func(i, j int) bool { return events[i].pos < events[j].pos })
+
+	for _, ev := range events {
+		if ev.effort != "" {
+			effort = ev.effort
+		}
+		if ev.model != "" {
+			model = ev.model
+		}
+	}
+	return
+}
+
 // ==== SECTION: TRANSCRIPT SCAN ====
 
 const (
@@ -362,26 +403,12 @@ func scanTranscript(path string) (effort, model string, err error) {
 
 		stripped := stripANSI(string(buffer))
 
-		if effort == "" {
-			if v := extractLatestEffort(stripped); v != "" {
-				effort = v
-			}
-			if m, e := extractLatestModelSet(stripped); e != "" {
-				if effort == "" {
-					effort = e
-				}
-				if model == "" {
-					model = m
-				}
-			}
+		e, m := extractLatestState(stripped)
+		if e != "" {
+			effort = e
 		}
-		if model == "" {
-			if m, _ := extractLatestModelSet(stripped); m != "" {
-				model = m
-			}
-			if v := extractLatestKeptModel(stripped); v != "" {
-				model = v
-			}
+		if m != "" {
+			model = m
 		}
 
 		if effort != "" && model != "" {
