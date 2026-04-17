@@ -136,3 +136,31 @@ func TestRenderBar(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		secs int64
+		want string
+	}{
+		{0, "0m"},
+		{60, "1m"},
+		{30, "0m"},
+		{29, "0m"},
+		{59, "0m"},
+		{60 * 48, "48m"},
+		{60 * 60, "1h"},
+		{60*60 + 60*30, "1h30m"},
+		{60 * 60 * 23, "23h"},
+		{60 * 60 * 24, "1d"},
+		{60*60*24 + 60*60*5, "1d 5h"},
+		{60*60*24*3 + 60*60*2, "3d 2h"},
+		{-100, "0m"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := formatDuration(tt.secs); got != tt.want {
+				t.Errorf("formatDuration(%d) = %q, want %q", tt.secs, got, tt.want)
+			}
+		})
+	}
+}

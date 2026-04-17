@@ -179,6 +179,32 @@ func renderBar(pct float64, width int) string {
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
+// ==== SECTION: DURATION ====
+
+func formatDuration(secs int64) string {
+	if secs < 0 {
+		secs = 0
+	}
+	mins := secs / 60
+	if mins >= 60*24 {
+		days := mins / (60 * 24)
+		hours := (mins % (60 * 24)) / 60
+		if hours == 0 {
+			return fmt.Sprintf("%dd", days)
+		}
+		return fmt.Sprintf("%dd %dh", days, hours)
+	}
+	if mins >= 60 {
+		hours := mins / 60
+		m := mins % 60
+		if m == 0 {
+			return fmt.Sprintf("%dh", hours)
+		}
+		return fmt.Sprintf("%dh%dm", hours, m)
+	}
+	return fmt.Sprintf("%dm", mins)
+}
+
 // ==== SECTION: MAIN ====
 
 func main() {
