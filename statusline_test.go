@@ -247,3 +247,71 @@ func TestCacheHitDisplay(t *testing.T) {
 		})
 	}
 }
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"raw ESC", "Set model to \x1b[1mOpus 4.7\x1b[22m effort", "Set model to Opus 4.7 effort"},
+		// JSON-escaped form: real transcripts encode ESC as the 6-char literal `\u001b`
+		{"JSON escaped", `Set model to \u001b[1mOpus 4.7\u001b[22m effort`, "Set model to Opus 4.7 effort"},
+		{"mixed plain", "no escapes here", "no escapes here"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripANSI(tt.in); got != tt.want {
+				t.Errorf("stripANSI = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractEffort(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"Set effort level to xhigh: deeper reasoning", "xhigh"},
+		{"Set effort level to max (this session only): max blah", "max"},
+		{"random other line", ""},
+		{"Set effort level to high: some text", "high"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := extractLatestEffort(tt.in); got != tt.want {
+				t.Errorf("extractLatestEffort(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractEffortLatestWins(t *testing.T) {
+	in := "Set effort level to low: x\nSet effort level to xhigh: y"
+	if got := extractLatestEffort(in); got != "xhigh" {
+		t.Errorf("latest = %q, want xhigh", got)
+	}
+}
+
+func TestExtractModelAndEffort(t *testing.T) {
+	in := "Set model to Opus 4.7 (1M context) (default) with xhigh effort"
+	model, effort := extractLatestModelSet(in)
+	if model != "Opus 4.7 (1M context) (default)" {
+		t.Errorf("model = %q", model)
+	}
+	if effort != "xhigh" {
+		t.Errorf("effort = %q", effort)
+	}
+}
+
+func TestExtractKeptModel(t *testing.T) {
+	in := "Kept model as Opus 4.7 (1M context) (default)</local-command-stdout>"
+	if got := extractLatestKeptModel(in); got != "Opus 4.7 (1M context) (default)" {
+		t.Errorf("kept = %q", got)
+	}
+}
+
+func TestExtractKeptModelEOL(t *testing.T) {
+	in := "Kept model as Sonnet 4.6"
+	if got := extractLatestKeptModel(in); got != "Sonnet 4.6" {
+		t.Errorf("kept = %q", got)
+	}
+}

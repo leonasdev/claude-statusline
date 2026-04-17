@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -245,6 +246,48 @@ func cacheHitDisplay(input, cacheRead, cacheCreation int) string {
 	}
 	pct := float64(cacheRead) / float64(denom) * 100.0
 	return fmt.Sprintf("Cache: %d%%", int(pct))
+}
+
+// ==== SECTION: TRANSCRIPT REGEX ====
+
+var (
+	// Match raw ESC byte OR JSON-escaped \u001b form (transcripts use the latter)
+	ansiRE       = regexp.MustCompile(`(\x1b|\\u001b)\[[0-9;]*m`)
+	effortRE     = regexp.MustCompile(`Set effort level to (\S+?)[: (]`)
+	modelSetRE   = regexp.MustCompile(`Set model to (.+?) with (\S+) effort`)
+	keptModelRE  = regexp.MustCompile(`Kept model as (.+?)(?:</|\n|$)`)
+)
+
+func stripANSI(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
+}
+
+// Find the LAST (rightmost) match of effortRE in s. Returns "" if none.
+func extractLatestEffort(s string) string {
+	matches := effortRE.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1][1]
+}
+
+// Find the last "Set model to ... with X effort" match. Returns ("", "") if none.
+func extractLatestModelSet(s string) (model, effort string) {
+	matches := modelSetRE.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
+		return "", ""
+	}
+	last := matches[len(matches)-1]
+	return last[1], last[2]
+}
+
+// Find the last "Kept model as X" match. Returns "" if none.
+func extractLatestKeptModel(s string) string {
+	matches := keptModelRE.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1][1]
 }
 
 // ==== SECTION: MAIN ====
