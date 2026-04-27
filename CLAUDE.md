@@ -40,7 +40,7 @@ Single Go file (`statusline.go`) partitioned by `// ==== SECTION: NAME ====` com
 2. Render each segment as a pure function of fields read directly from stdin — `Effort.Level`, `Model.DisplayName`, `Workspace.CurrentDir`, `ContextWindow.UsedPercentage`, `RateLimits.FiveHour.*`.
 3. Print joined output. No state is persisted between ticks.
 
-CC's stdin (since v2.1.x) directly emits `effort.level` (already resolved — `auto` becomes the concrete value like `max`/`high`/`medium`), so there's no transcript scanning, no sidecar cache, and no `~/.claude/settings.json` fallback. Earlier versions of this codebase had all three; `git log -- statusline.go` shows the simplification commit.
+CC's stdin (since 2.1.119) directly emits `effort.level` (already resolved — `auto` becomes the concrete value like `max`/`high`/`medium`), so there's no transcript scanning, no sidecar cache, and no `~/.claude/settings.json` fallback. Earlier versions of this codebase had all three; `git log -- statusline.go` shows the simplification commit.
 
 ### Effort display rules
 - `effort.level` comes pre-resolved from CC stdin. Map keys: `low`, `medium`, `high`, `xhigh`, `max`. Unknown values fall back to `high` icon.

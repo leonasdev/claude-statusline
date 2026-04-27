@@ -22,7 +22,7 @@ Left to right, empty segments drop out cleanly:
 
 ## Install
 
-Requires Go 1.25+ and Claude Code v2.1.x+ (for the `effort.level` field in stdin).
+Requires Go 1.25+ and Claude Code 2.1.119+ (for the `effort.level` field in stdin).
 
 ### Quick (binary only)
 
@@ -97,4 +97,4 @@ See `CLAUDE.md` for architecture notes and design decisions.
 
 ## License
 
-TBD.
+MIT — see [LICENSE](LICENSE).
