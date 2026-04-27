@@ -198,7 +198,7 @@ func renderBar(pct float64, width int) string {
 	if filled > width {
 		filled = width
 	}
-	return strings.Repeat("█", filled) + strings.Repeat("▒", width-filled)
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
 // ==== SECTION: DURATION ====
@@ -331,7 +331,7 @@ func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
 			branch = strings.TrimSpace(string(ss))
 		}
 	}
-	pb, err := exec.Command("git", "-C", cwd, "status", "--no-optional-locks", "--porcelain=v1", "-uall").Output()
+	pb, err := exec.Command("git", "-C", cwd, "--no-optional-locks", "status", "--porcelain=v1", "-uall").Output()
 	if err != nil {
 		return branch, 0, 0, 0
 	}
