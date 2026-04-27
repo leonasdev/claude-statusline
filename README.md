@@ -3,7 +3,7 @@
 A custom status line for [Claude Code](https://github.com/anthropics/claude-code), written in Go. One file, no dependencies, easy to fork and tweak.
 
 ```
-~/.claude/bin │  main │ Opus 4.7 (1M) │ ◈ max │ Ctx: 12.5% │ Session: [████░░░░░░░░░░░░] 26.0% │ Reset: 3h35m20s
+~/claude-statusline │  master │ Opus 4.7 (1M) │ ◈ max │ Ctx: 12.5% │ Session: [████░░░░░░░░░░░░] 26.0% │ Reset: 3h35m20s
 ```
 
 ## Segments
