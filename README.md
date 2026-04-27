@@ -1,6 +1,6 @@
 # claude-statusline
 
-A custom status line for [Claude Code](https://github.com/anthropics/claude-code), written in Go. Drop-in replacement for `ccstatusline`.
+A custom status line for [Claude Code](https://github.com/anthropics/claude-code), written in Go. One file, no dependencies, easy to fork and tweak.
 
 ```
 ~/.claude/bin │  main │ Opus 4.7 (1M) │ ◈ max │ Ctx: 12.5% │ Session: [████░░░░░░░░░░░░] 26.0% │ Reset: 3h35m20s
@@ -8,7 +8,7 @@ A custom status line for [Claude Code](https://github.com/anthropics/claude-code
 
 ## Why
 
-`ccstatusline` is fine but I wanted something I could change without forking a Node project. This is one Go file (~430 lines), one shell wrapper, no dependencies. The wrapper auto-rebuilds the binary when the source changes, and a failed build leaves the previous binary running so the CC status bar never breaks.
+Most existing CC status lines are configurable but not hackable — you compose from preset segments and call it a day. This repo goes the other way: ~430 lines of Go, one shell wrapper, zero dependencies. Open the file, change what you want, save. The wrapper auto-rebuilds on source change, and a failed build keeps the old binary running so the CC status bar never breaks while you iterate.
 
 ## Segments
 
@@ -28,25 +28,39 @@ Left to right, empty segments drop out cleanly:
 
 Requires Go 1.25+ and Claude Code v2.1.x+ (for the `effort.level` field in stdin).
 
+### Quick (binary only)
+
 ```bash
-git clone <this-repo> ~/.claude/bin
-cd ~/.claude/bin
-go build -o statusline .
+go install github.com/leonasdev/claude-statusline@latest
 ```
 
-Then in `~/.claude/settings.json`:
+Then in `~/.claude/settings.json` (assumes `~/go/bin` is in your `PATH`):
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/bin/statusline.sh",
+    "command": "claude-statusline",
     "refreshInterval": 1
   }
 }
 ```
 
-`statusline.sh` rebuilds the binary on its own when `statusline.go` is newer, so subsequent edits don't need a manual `go build`.
+### Development (clone + auto-rebuild on edit)
+
+```bash
+git clone https://github.com/leonasdev/claude-statusline.git
+cd claude-statusline
+go build -o statusline .
+```
+
+Point CC at the shell wrapper instead of the binary:
+
+```json
+"command": "/absolute/path/to/claude-statusline/statusline.sh"
+```
+
+`statusline.sh` rebuilds the binary on its own when `statusline.go` is newer, so subsequent edits don't need a manual `go build`. Failed builds are logged to `/tmp/claude-statusline-build.log` and the previous binary keeps running.
 
 ## Customizing
 
