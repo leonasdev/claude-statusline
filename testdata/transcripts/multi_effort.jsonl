@@ -1,4 +1,0 @@
-{"type":"permission-mode","permissionMode":"auto","sessionId":"x"}
-{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to medium: x</local-command-stdout>"}}
-{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to xhigh: y</local-command-stdout>"}}
-{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to max (this session only): z</local-command-stdout>"}}

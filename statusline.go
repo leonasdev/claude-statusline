@@ -6,9 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
-	"sort"
 	"strings"
 	"time"
 )
@@ -16,9 +13,7 @@ import (
 // ==== SECTION: INPUT TYPES ====
 
 type Input struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	Model          struct {
+	Model struct {
 		ID          string `json:"id"`
 		DisplayName string `json:"display_name"`
 	} `json:"model"`
@@ -42,6 +37,9 @@ type Input struct {
 			ResetsAt       int64   `json:"resets_at"`
 		} `json:"five_hour"`
 	} `json:"rate_limits"`
+	Effort struct {
+		Level string `json:"level"`
+	} `json:"effort"`
 }
 
 func parseInput(r io.Reader) (*Input, error) {
@@ -59,7 +57,12 @@ const (
 	colorLightYellow = "\x1b[93m"
 	colorLightBlack  = "\x1b[90m"
 	colorClaudeBold  = "\x1b[1;38;2;217;119;87m"
-	colorNone        = ""
+	// Bright white. Used for the path segment. Neither `\x1b[0m` nor
+	// `\x1b[22;39m` (default fg) works inside CC's TUI — both collapse to
+	// the ambient frame-gray of the statusline container. Only an EXPLICIT
+	// color code forces CC to render our chosen shade.
+	colorDefaultFg = "\x1b[97m"
+	colorNone      = ""
 )
 
 func colorize(s, color string) string {
@@ -204,24 +207,34 @@ func formatDuration(secs int64) string {
 	if secs < 0 {
 		secs = 0
 	}
-	mins := secs / 60
-	if mins >= 60*24 {
-		days := mins / (60 * 24)
-		hours := (mins % (60 * 24)) / 60
+	days := secs / (60 * 60 * 24)
+	hours := (secs / 3600) % 24
+	mins := (secs / 60) % 60
+	s := secs % 60
+
+	if days > 0 {
 		if hours == 0 {
 			return fmt.Sprintf("%dd", days)
 		}
 		return fmt.Sprintf("%dd %dh", days, hours)
 	}
-	if mins >= 60 {
-		hours := mins / 60
-		m := mins % 60
-		if m == 0 {
-			return fmt.Sprintf("%dh", hours)
+	if hours > 0 {
+		out := fmt.Sprintf("%dh", hours)
+		if mins > 0 {
+			out += fmt.Sprintf("%dm", mins)
 		}
-		return fmt.Sprintf("%dh%dm", hours, m)
+		if s > 0 {
+			out += fmt.Sprintf("%ds", s)
+		}
+		return out
 	}
-	return fmt.Sprintf("%dm", mins)
+	if mins > 0 {
+		if s == 0 {
+			return fmt.Sprintf("%dm", mins)
+		}
+		return fmt.Sprintf("%dm%ds", mins, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }
 
 // ==== SECTION: EFFORT/MODEL DISPLAY ====
@@ -250,263 +263,16 @@ func modelDisplay(name string) string {
 	return name
 }
 
-// ==== SECTION: CTX/CACHE ====
+// ==== SECTION: CTX ====
 
 func contextDisplay(usedPct float64) string {
 	pct := usedPct / 0.8
 	return fmt.Sprintf("Ctx: %.1f%%", pct)
 }
 
-func cacheHitDisplay(input, cacheRead, cacheCreation int) string {
-	denom := input + cacheRead + cacheCreation
-	if denom == 0 {
-		return "Cache: -"
-	}
-	pct := float64(cacheRead) / float64(denom) * 100.0
-	return fmt.Sprintf("Cache: %d%%", int(pct))
-}
-
-// ==== SECTION: TRANSCRIPT REGEX ====
-
-var (
-	// Match raw ESC byte OR JSON-escaped \u001b form (transcripts use the latter)
-	ansiRE = regexp.MustCompile(`(\x1b|\\u001b)\[[0-9;]*m`)
-	// Anchor to `"content":"<local-command-stdout>` — this is the exact byte
-	// sequence at the start of a CC slash-command output entry's content
-	// field. Prose mentioning the same strings is wrapped in JSON-escaped
-	// quotes (`\"content\":\"`) so won't match.
-	// Two CC output formats observed:
-	//   "Set effort level to X: description" — for explicit levels (low/medium/high/xhigh/max)
-	//   "Effort level set to auto"           — for auto (no description, terminated by '<')
-	// Group 1 captures the old format, group 2 captures the new format.
-	effortRE = regexp.MustCompile(`"content":"<local-command-stdout>(?:Set effort level to (\S+?)[: (]|Effort level set to (\S+?)<)`)
-	// "Set model to <model>" handles four variants observed in real CC output:
-	//   Set model to X
-	//   Set model to X with Y effort
-	//   Set model to X · Billed as extra usage
-	//   Set model to X with Y effort · Billed as extra usage
-	// Captures: 1=model name, 2=effort (may be empty if "with ... effort" is absent)
-	modelSetRE  = regexp.MustCompile(`"content":"<local-command-stdout>Set model to (.+?)(?: with (\S+) effort)?(?: ·[^<]*?)?</local-command-stdout>`)
-	keptModelRE = regexp.MustCompile(`"content":"<local-command-stdout>Kept model as (.+?)</local-command-stdout>`)
-)
-
-func stripANSI(s string) string {
-	return ansiRE.ReplaceAllString(s, "")
-}
-
-// Find the LAST (rightmost) match of effortRE in s. Returns "" if none.
-// Picks whichever capture group (old vs new format) is non-empty.
-func extractLatestEffort(s string) string {
-	matches := effortRE.FindAllStringSubmatch(s, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	last := matches[len(matches)-1]
-	if last[1] != "" {
-		return last[1]
-	}
-	return last[2]
-}
-
-// Find the last "Set model to ... with X effort" match. Returns ("", "") if none.
-func extractLatestModelSet(s string) (model, effort string) {
-	matches := modelSetRE.FindAllStringSubmatch(s, -1)
-	if len(matches) == 0 {
-		return "", ""
-	}
-	last := matches[len(matches)-1]
-	return last[1], last[2]
-}
-
-// Find the last "Kept model as X" match. Returns "" if none.
-func extractLatestKeptModel(s string) string {
-	matches := keptModelRE.FindAllStringSubmatch(s, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	return matches[len(matches)-1][1]
-}
-
-// extractLatestState replays every effort/model change event in s ordered by
-// position, returning the final (effort, model) state. This handles the case
-// where the most recent change is embedded in a "Set model to X with Y effort"
-// line rather than a standalone "Set effort level to" line.
-func extractLatestState(s string) (effort, model string) {
-	type event struct {
-		pos            int
-		effort, model  string
-	}
-	var events []event
-
-	for _, m := range effortRE.FindAllStringSubmatchIndex(s, -1) {
-		// effortRE has two capture groups (old/new format); pick whichever matched
-		var val string
-		switch {
-		case m[2] >= 0:
-			val = s[m[2]:m[3]]
-		case len(m) > 5 && m[4] >= 0:
-			val = s[m[4]:m[5]]
-		}
-		events = append(events, event{pos: m[1], effort: val})
-	}
-	for _, m := range modelSetRE.FindAllStringSubmatchIndex(s, -1) {
-		ev := event{pos: m[1], model: s[m[2]:m[3]]}
-		// modelSetRE's second capture (effort) is optional; when absent the
-		// submatch index is -1.
-		if len(m) > 5 && m[4] >= 0 {
-			ev.effort = s[m[4]:m[5]]
-		}
-		events = append(events, ev)
-	}
-	for _, m := range keptModelRE.FindAllStringSubmatchIndex(s, -1) {
-		events = append(events, event{pos: m[1], model: s[m[2]:m[3]]})
-	}
-
-	sort.Slice(events, func(i, j int) bool { return events[i].pos < events[j].pos })
-
-	for _, ev := range events {
-		if ev.effort != "" {
-			effort = ev.effort
-		}
-		if ev.model != "" {
-			model = ev.model
-		}
-	}
-	return
-}
-
-// ==== SECTION: TRANSCRIPT SCAN ====
-
-const (
-	transcriptChunkSize = 64 * 1024
-	transcriptMaxBudget = 1024 * 1024
-)
-
-func scanTranscript(path string) (effort, model string, err error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", "", err
-	}
-	defer f.Close()
-
-	stat, err := f.Stat()
-	if err != nil {
-		return "", "", err
-	}
-	size := stat.Size()
-	if size == 0 {
-		return "", "", nil
-	}
-
-	pos := size
-	bytesRead := int64(0)
-	var buffer []byte
-
-	for pos > 0 && bytesRead < transcriptMaxBudget {
-		readSize := int64(transcriptChunkSize)
-		if pos < readSize {
-			readSize = pos
-		}
-		newPos := pos - readSize
-		if _, err := f.Seek(newPos, io.SeekStart); err != nil {
-			return "", "", err
-		}
-		chunk := make([]byte, readSize)
-		if _, err := io.ReadFull(f, chunk); err != nil {
-			return "", "", err
-		}
-		pos = newPos
-		bytesRead += readSize
-		buffer = append(chunk, buffer...)
-
-		stripped := stripANSI(string(buffer))
-
-		e, m := extractLatestState(stripped)
-		if e != "" {
-			effort = e
-		}
-		if m != "" {
-			model = m
-		}
-
-		if effort != "" && model != "" {
-			break
-		}
-	}
-
-	return effort, model, nil
-}
-
-// ==== SECTION: CACHE ====
-
-type CacheEntry struct {
-	Effort            string `json:"effort,omitempty"`
-	Model             string `json:"model,omitempty"`
-	TranscriptMtimeNs int64  `json:"transcript_mtime_ns,omitempty"`
-	TranscriptSize    int64  `json:"transcript_size,omitempty"`
-}
-
-func cachePath(sessionID string) string {
-	dir := os.Getenv("XDG_CACHE_HOME")
-	if dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".cache")
-	}
-	return filepath.Join(dir, "claude-statusline", sessionID+".json")
-}
-
-func loadCache(path string) (*CacheEntry, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &CacheEntry{}, nil
-		}
-		return &CacheEntry{}, nil // treat any read error as empty
-	}
-	var c CacheEntry
-	if err := json.Unmarshal(data, &c); err != nil {
-		return &CacheEntry{}, nil // corrupt → empty
-	}
-	return &c, nil
-}
-
-func saveCache(path string, c *CacheEntry) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	data, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-// ==== SECTION: SETTINGS FALLBACK ====
-
-func readSettingsEffort(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	var s struct {
-		EffortLevel string `json:"effortLevel"`
-	}
-	if err := json.Unmarshal(data, &s); err != nil {
-		return ""
-	}
-	return s.EffortLevel
-}
-
-func defaultSettingsPath() string {
-	return filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
-}
-
 // ==== SECTION: GIT ====
 
-const gitBranchIcon = "" //
+const gitBranchIcon = "" // Nerd Font branch glyph
 
 func parsePorcelain(raw string) (untracked, modified, deleted int) {
 	for _, line := range strings.Split(raw, "\n") {
@@ -565,7 +331,7 @@ func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
 			branch = strings.TrimSpace(string(ss))
 		}
 	}
-	pb, err := exec.Command("git", "-C", cwd, "status", "--porcelain=v1", "-uall").Output()
+	pb, err := exec.Command("git", "-C", cwd, "status", "--no-optional-locks", "--porcelain=v1", "-uall").Output()
 	if err != nil {
 		return branch, 0, 0, 0
 	}
@@ -573,16 +339,16 @@ func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
 	return branch, u, m, d
 }
 
-
 // ==== SECTION: SEGMENT RENDERERS ====
 
 func renderPathSegment(cwd string) string {
 	home := os.Getenv("HOME")
 	displayed := substituteHome(cwd, home)
-	// Wrap with full ANSI reset on both ends so ambient attributes set by
-	// CC's TUI chrome (color, dim, bold, etc.) don't bleed into the path.
-	// `\x1b[39m` alone only resets foreground color and leaves dim intact.
-	return colorize(fitPath(displayed), colorReset)
+	// CC's TUI renders the statusline inside a gray-styled container and
+	// treats `\x1b[0m` / `\x1b[39m` (default fg) as "inherit container" —
+	// so we have to pick an explicit color. Bright white tracks most
+	// terminal default fg themes closely.
+	return colorize(fitPath(displayed), colorDefaultFg)
 }
 
 func renderGitSegment(branch string, untracked, modified, deleted int) string {
@@ -597,23 +363,6 @@ func renderModelSegment(name string) string {
 	return colorize(modelDisplay(name), colorClaudeBold)
 }
 
-// modelDefaultEffort maps a model family to its effort level when /effort=auto.
-// Updated based on observed CC behavior; tweak when official defaults change.
-var modelDefaultEffort = map[string]string{
-	"Opus":   "xhigh",
-	"Sonnet": "medium",
-}
-
-// defaultEffortFor returns the model's default effort, or "high" if unknown.
-func defaultEffortFor(model string) string {
-	for prefix, eff := range modelDefaultEffort {
-		if strings.Contains(model, prefix) {
-			return eff
-		}
-	}
-	return "high"
-}
-
 // modelHasNoEffort returns true for models that don't support effort levels.
 func modelHasNoEffort(model string) bool {
 	return strings.Contains(model, "Haiku")
@@ -623,18 +372,11 @@ func renderEffortSegment(level, model string) string {
 	if modelHasNoEffort(model) {
 		return ""
 	}
-	if level == "auto" {
-		level = defaultEffortFor(model)
-	}
 	return colorize(effortDisplay(level), colorLightBlack)
 }
 
 func renderContextSegment(usedPct float64) string {
 	return colorize(contextDisplay(usedPct), colorLightBlack)
-}
-
-func renderCacheSegment(input, cacheRead, cacheCreation int) string {
-	return colorize(cacheHitDisplay(input, cacheRead, cacheCreation), colorLightBlack)
 }
 
 func renderSessionSegment(pct float64) string {
@@ -677,82 +419,16 @@ func main() {
 		return
 	}
 
-	// Resolve effort + model with sidecar cache
-	cachePathStr := cachePath(in.SessionID)
-	cache, _ := loadCache(cachePathStr)
-	effort, model := resolveEffortAndModel(in, cache)
-	cacheChanged := updateCache(cache, in, effort, model)
-
 	gitBranch, gitU, gitM, gitD := runGitInfo(in.Workspace.CurrentDir)
 
 	pathSeg := renderPathSegment(in.Workspace.CurrentDir)
 	gitSeg := renderGitSegment(gitBranch, gitU, gitM, gitD)
-	modelSeg := renderModelSegment(model)
-	effortSeg := renderEffortSegment(effort, model)
+	modelSeg := renderModelSegment(in.Model.DisplayName)
+	effortSeg := renderEffortSegment(in.Effort.Level, in.Model.DisplayName)
 	ctxSeg := renderContextSegment(in.ContextWindow.UsedPercentage)
-	cacheSeg := renderCacheSegment(
-		in.ContextWindow.CurrentUsage.InputTokens,
-		in.ContextWindow.CurrentUsage.CacheReadInputTokens,
-		in.ContextWindow.CurrentUsage.CacheCreationInputTokens,
-	)
 	sessSeg := renderSessionSegment(in.RateLimits.FiveHour.UsedPercentage)
 	resetSeg := renderResetSegment(in.RateLimits.FiveHour.ResetsAt, time.Now().Unix())
 
-	out := joinSegments([]string{pathSeg, gitSeg, modelSeg, effortSeg, ctxSeg, cacheSeg, sessSeg, resetSeg})
+	out := joinSegments([]string{pathSeg, gitSeg, modelSeg, effortSeg, ctxSeg, sessSeg, resetSeg})
 	fmt.Print(out)
-
-	if cacheChanged {
-		_ = saveCache(cachePathStr, cache)
-	}
-}
-
-// resolveEffortAndModel walks: cache → transcript scan → settings/Input fallbacks.
-func resolveEffortAndModel(in *Input, cache *CacheEntry) (effort, model string) {
-	stat, err := os.Stat(in.TranscriptPath)
-	if err == nil &&
-		stat.ModTime().UnixNano() == cache.TranscriptMtimeNs &&
-		stat.Size() == cache.TranscriptSize &&
-		(cache.Effort != "" || cache.Model != "") {
-		return cache.Effort, cache.Model
-	}
-
-	if in.TranscriptPath != "" {
-		eff, mod, _ := scanTranscript(in.TranscriptPath)
-		effort = eff
-		model = mod
-	}
-
-	if effort == "" {
-		effort = readSettingsEffort(defaultSettingsPath())
-	}
-	if effort == "" {
-		effort = "high"
-	}
-	if model == "" {
-		model = in.Model.DisplayName
-	}
-	return effort, model
-}
-
-func updateCache(cache *CacheEntry, in *Input, effort, model string) bool {
-	changed := false
-	if cache.Effort != effort {
-		cache.Effort = effort
-		changed = true
-	}
-	if cache.Model != model {
-		cache.Model = model
-		changed = true
-	}
-	stat, err := os.Stat(in.TranscriptPath)
-	if err == nil {
-		ns := stat.ModTime().UnixNano()
-		sz := stat.Size()
-		if cache.TranscriptMtimeNs != ns || cache.TranscriptSize != sz {
-			cache.TranscriptMtimeNs = ns
-			cache.TranscriptSize = sz
-			changed = true
-		}
-	}
-	return changed
 }

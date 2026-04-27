@@ -1,3 +1,0 @@
-{"type":"permission-mode","permissionMode":"auto","sessionId":"x"}
-{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to \u001b[1mOpus 4.7 (1M context) (default)\u001b[22m with \u001b[1mxhigh\u001b[22m effort</local-command-stdout>"}}
-{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to high: x</local-command-stdout>"}}
