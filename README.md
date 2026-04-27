@@ -6,10 +6,6 @@ A custom status line for [Claude Code](https://github.com/anthropics/claude-code
 ~/.claude/bin │  main │ Opus 4.7 (1M) │ ◈ max │ Ctx: 12.5% │ Session: [████░░░░░░░░░░░░] 26.0% │ Reset: 3h35m20s
 ```
 
-## Why
-
-Most existing CC status lines are configurable but not hackable — you compose from preset segments and call it a day. This repo goes the other way: ~430 lines of Go, one shell wrapper, zero dependencies. Open the file, change what you want, save. The wrapper auto-rebuilds on source change, and a failed build keeps the old binary running so the CC status bar never breaks while you iterate.
-
 ## Segments
 
 Left to right, empty segments drop out cleanly:
