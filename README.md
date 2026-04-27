@@ -3,7 +3,7 @@
 A custom status line for [Claude Code](https://github.com/anthropics/claude-code), written in Go. One file, no dependencies, easy to fork and tweak.
 
 ```
-~/claude-statusline │  master │ Opus 4.7 (1M) │ ◈ max │ Ctx: 12.5% │ Session: [████░░░░░░░░░░░░] 26.0% │ Reset: 3h35m20s
+~/claude-statusline │  master │ Opus 4.7 (1M) │ ◈ max │ Ctx: 12.5% │ Session: [████▒▒▒▒▒▒▒▒▒▒▒▒] 26.0% │ Reset: 3h35m20s
 ```
 
 ## Segments
@@ -56,7 +56,7 @@ Point CC at the shell wrapper instead of the binary:
 "command": "/absolute/path/to/claude-statusline/statusline.sh"
 ```
 
-`statusline.sh` rebuilds the binary on its own when `statusline.go` is newer, so subsequent edits don't need a manual `go build`. Failed builds are logged to `/tmp/claude-statusline-build.log` and the previous binary keeps running.
+`statusline.sh` rebuilds the binary on its own when `statusline.go` is newer, so subsequent edits don't need a manual `go build`. Failed builds are logged to `build.log` (next to the script) and the previous binary keeps running.
 
 ## Customizing
 
@@ -71,17 +71,14 @@ Tests are pure unit tests (`go test ./...`); add a corresponding `TestRender<Nam
 
 ## Debugging
 
-CC pipes a JSON blob into the binary every tick. Two ways to inspect what it actually contains:
+CC pipes a JSON blob into the binary every tick. From the repo dir:
 
 ```bash
-# One-shot — sentinel auto-removes after one tick
-touch /tmp/.cc-dump-stdin && sleep 1.5 && cat /tmp/cc-stdin.json | jq .
-
-# Continuous — every tick overwrites the file
-STATUSLINE_DUMP=/tmp/cc-stdin.json   # set in CC's launch env
+# Sentinel auto-removes after one tick; output lands in cc-stdin.json
+touch .dump-stdin && sleep 1.5 && cat cc-stdin.json | jq .
 ```
 
-Build errors land in `/tmp/claude-statusline-build.log` (stale binary keeps running so the status bar stays alive).
+Build errors land in `build.log` next to the script (stale binary keeps running so the status bar stays alive).
 
 ## Development
 

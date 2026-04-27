@@ -198,7 +198,7 @@ func renderBar(pct float64, width int) string {
 	if filled > width {
 		filled = width
 	}
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	return strings.Repeat("█", filled) + strings.Repeat("▒", width-filled)
 }
 
 // ==== SECTION: DURATION ====

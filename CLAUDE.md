@@ -26,10 +26,10 @@ go test -v ./...                    # verbose
 echo '{"model":{"display_name":"Opus 4.7 (1M context)"},"workspace":{"current_dir":"/tmp"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":10,"resets_at":0}},"effort":{"level":"max"}}' | ./statusline
 
 # Capture the actual stdin CC is sending right now (one-shot)
-touch /tmp/.cc-dump-stdin && sleep 1.5 && cat /tmp/cc-stdin.json | jq .
+touch ~/.claude/bin/.dump-stdin && sleep 1.5 && cat ~/.claude/bin/cc-stdin.json | jq .
 ```
 
-Build failures are captured in `/tmp/claude-statusline-build.log` and do NOT overwrite the existing binary — the previous version keeps running so CC's status bar never breaks.
+Build failures are captured in `build.log` next to the script and do NOT overwrite the existing binary — the previous version keeps running so CC's status bar never breaks.
 
 ## Architecture
 
@@ -67,7 +67,5 @@ Path segment is wrapped with a full `\x1b[0m` reset (not just `\x1b[39m`) so CC'
 
 ## Capturing real CC stdin
 
-`statusline.sh` supports two debug modes for inspecting what CC actually pipes to the binary:
-- One-shot: `touch /tmp/.cc-dump-stdin` — next tick (~1s) writes stdin to `/tmp/cc-stdin.json` and auto-removes the sentinel. Read it with `cat /tmp/cc-stdin.json | jq .`.
-- Continuous: set `STATUSLINE_DUMP=/path/to/file` in the env CC launches the script with — every tick overwrites the file.
+From the repo dir, `touch .dump-stdin` and the next tick (~1s) writes that tick's stdin to `cc-stdin.json` and removes the sentinel.
 
