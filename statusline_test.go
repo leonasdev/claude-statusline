@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,8 @@ func TestParseInput(t *testing.T) {
 		"rate_limits": {
 			"five_hour": {"used_percentage": 23.5, "resets_at": 1745683200}
 		},
-		"effort": {"level": "max"}
+		"effort": {"level": "max"},
+		"version": "2.1.119"
 	}`
 
 	in, err := parseInput(strings.NewReader(raw))
@@ -45,6 +47,9 @@ func TestParseInput(t *testing.T) {
 	}
 	if in.Effort.Level != "max" {
 		t.Errorf("Effort.Level = %q, want max", in.Effort.Level)
+	}
+	if in.Version != "2.1.119" {
+		t.Errorf("Version = %q, want 2.1.119", in.Version)
 	}
 }
 
@@ -145,16 +150,16 @@ func TestFormatDuration(t *testing.T) {
 		{1, "1s"},
 		{29, "29s"},
 		{59, "59s"},
-		{60, "1m"},
-		{61, "1m1s"},
+		{60, "1m00s"},
+		{61, "1m01s"},
 		{90, "1m30s"},
-		{60 * 48, "48m"},
+		{60 * 48, "48m00s"},
 		{60*48 + 15, "48m15s"},
-		{60 * 60, "1h"},
-		{60*60 + 5, "1h5s"},
-		{60*60 + 60*30, "1h30m"},
+		{60 * 60, "1h00m00s"},
+		{60*60 + 5, "1h00m05s"},
+		{60*60 + 60*30, "1h30m00s"},
 		{60*60 + 60*30 + 15, "1h30m15s"},
-		{60 * 60 * 23, "23h"},
+		{60 * 60 * 23, "23h00m00s"},
 		{60 * 60 * 24, "1d"},
 		{60*60*24 + 60*60*5, "1d 5h"},
 		{60*60*24*3 + 60*60*2, "3d 2h"},
@@ -334,6 +339,168 @@ func TestRenderGitSegment(t *testing.T) {
 	want := colorLightYellow + " main ?3 ~8 -2" + colorReset
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestPctColor(t *testing.T) {
+	tests := []struct {
+		pct  float64
+		want string
+	}{
+		{0, colorLightBlack},
+		{50, colorLightBlack},
+		{79.9, colorLightBlack},
+		{80, colorLightYellow},
+		{94.9, colorLightYellow},
+		{95, colorLightRed},
+		{100, colorLightRed},
+		{120, colorLightRed},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%.1f", tt.pct), func(t *testing.T) {
+			if got := pctColor(tt.pct); got != tt.want {
+				t.Errorf("pctColor(%v) = %q, want %q", tt.pct, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderContextSegmentColors(t *testing.T) {
+	// Label stays dim; only the value flips. Ctx is rescaled (used / 0.8), so
+	// stdin 64 -> displayed 80% (yellow); stdin 76 -> 95% (red).
+	tests := []struct {
+		usedPct  float64
+		valColor string
+	}{
+		{0, colorLightBlack},
+		{40, colorLightBlack},
+		{63.9, colorLightBlack},
+		{64, colorLightYellow},
+		{75.9, colorLightYellow},
+		{76, colorLightRed},
+		{80, colorLightRed},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%.1f", tt.usedPct), func(t *testing.T) {
+			got := renderContextSegment(tt.usedPct)
+			labelWrapped := colorize("Ctx: ", colorLightBlack)
+			if !strings.HasPrefix(got, labelWrapped) {
+				t.Errorf("label not dim: %q", got)
+			}
+			valueWrapped := colorize(fmt.Sprintf("%.1f%%", contextPct(tt.usedPct)), tt.valColor)
+			if !strings.Contains(got, valueWrapped) {
+				t.Errorf("renderContextSegment(%v) = %q, missing value %q", tt.usedPct, got, valueWrapped)
+			}
+		})
+	}
+}
+
+func TestRenderSessionSegmentColors(t *testing.T) {
+	const resetsAt = int64(1_700_000_000)
+	tests := []struct {
+		pct      float64
+		valColor string
+	}{
+		{0, colorLightBlack},
+		{79.9, colorLightBlack},
+		{80, colorLightYellow},
+		{94.9, colorLightYellow},
+		{95, colorLightRed},
+		{100, colorLightRed},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%.1f", tt.pct), func(t *testing.T) {
+			got := renderSessionSegment(tt.pct, resetsAt)
+			if !strings.HasPrefix(got, colorLightBlack) {
+				t.Errorf("label not dim: %q", got)
+			}
+			valueWrapped := colorize(fmt.Sprintf("%.1f%%", tt.pct), tt.valColor)
+			if !strings.Contains(got, valueWrapped) {
+				t.Errorf("renderSessionSegment(%v) = %q, missing value %q", tt.pct, got, valueWrapped)
+			}
+		})
+	}
+}
+
+func TestVisibleWidth(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"abc", 3},
+		{colorize("abc", colorLightBlack), 3},
+		{colorize("abc", colorLightYellow) + colorize("de", colorLightRed), 5},
+		{"a" + colorReset + "b", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := visibleWidth(tt.in); got != tt.want {
+				t.Errorf("visibleWidth(%q) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAlignRight(t *testing.T) {
+	left := "abc"
+	right := "ver"
+	tests := []struct {
+		name       string
+		totalWidth int
+		want       string
+	}{
+		{"unknown width", 0, "abc ver"},
+		{"exact fit", 6, "abcver"},
+		{"too narrow", 5, "abc ver"},
+		{"with padding", 10, "abc    ver"},
+		{"no right", 10, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := right
+			if tt.name == "no right" {
+				r = ""
+				tt.want = left
+			}
+			if got := alignRight(left, r, tt.totalWidth); got != tt.want {
+				t.Errorf("alignRight(%q, %q, %d) = %q, want %q", left, r, tt.totalWidth, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAlignRightStripsAnsiForWidth(t *testing.T) {
+	// Visible width of "abc" wrapped in dim is 3, not 8+.
+	left := colorize("abc", colorLightBlack)
+	right := colorize("ver", colorLightBlack)
+	got := alignRight(left, right, 10)
+	// 10 - 3 - 3 = 4 padding spaces between them.
+	want := left + "    " + right
+	if got != want {
+		t.Errorf("alignRight stripped width wrong: got %q, want %q", got, want)
+	}
+}
+
+func TestRenderVersionSegment(t *testing.T) {
+	if got := renderVersionSegment(""); got != "" {
+		t.Errorf("empty version should hide segment, got %q", got)
+	}
+	got := renderVersionSegment("2.1.119")
+	want := colorize("v2.1.119", colorLightBlack)
+	if got != want {
+		t.Errorf("renderVersionSegment = %q, want %q", got, want)
+	}
+}
+
+func TestRenderSessionSegmentPlaceholderStaysDim(t *testing.T) {
+	// resetsAt == 0 means data not populated yet; stay dim regardless of pct.
+	got := renderSessionSegment(99, 0)
+	if !strings.HasPrefix(got, colorLightBlack) {
+		t.Errorf("placeholder prefix = %q, want %q", got, colorLightBlack)
+	}
+	if strings.Contains(got, colorLightRed) || strings.Contains(got, colorLightYellow) {
+		t.Errorf("placeholder leaked threshold color: %q", got)
 	}
 }
 

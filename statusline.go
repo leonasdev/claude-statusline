@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
 // ==== SECTION: INPUT TYPES ====
@@ -40,6 +42,7 @@ type Input struct {
 	Effort struct {
 		Level string `json:"level"`
 	} `json:"effort"`
+	Version string `json:"version"`
 }
 
 func parseInput(r io.Reader) (*Input, error) {
@@ -55,6 +58,7 @@ func parseInput(r io.Reader) (*Input, error) {
 const (
 	colorReset       = "\x1b[0m"
 	colorLightYellow = "\x1b[93m"
+	colorLightRed    = "\x1b[91m"
 	colorLightBlack  = "\x1b[90m"
 	colorClaudeBold  = "\x1b[1;38;2;217;119;87m"
 	// Bright white. Used for the path segment. Neither `\x1b[0m` nor
@@ -219,20 +223,10 @@ func formatDuration(secs int64) string {
 		return fmt.Sprintf("%dd %dh", days, hours)
 	}
 	if hours > 0 {
-		out := fmt.Sprintf("%dh", hours)
-		if mins > 0 {
-			out += fmt.Sprintf("%dm", mins)
-		}
-		if s > 0 {
-			out += fmt.Sprintf("%ds", s)
-		}
-		return out
+		return fmt.Sprintf("%dh%02dm%02ds", hours, mins, s)
 	}
 	if mins > 0 {
-		if s == 0 {
-			return fmt.Sprintf("%dm", mins)
-		}
-		return fmt.Sprintf("%dm%ds", mins, s)
+		return fmt.Sprintf("%dm%02ds", mins, s)
 	}
 	return fmt.Sprintf("%ds", s)
 }
@@ -265,9 +259,12 @@ func modelDisplay(name string) string {
 
 // ==== SECTION: CTX ====
 
+func contextPct(usedPct float64) float64 {
+	return usedPct / 0.8
+}
+
 func contextDisplay(usedPct float64) string {
-	pct := usedPct / 0.8
-	return fmt.Sprintf("Ctx: %.1f%%", pct)
+	return fmt.Sprintf("Ctx: %.1f%%", contextPct(usedPct))
 }
 
 // ==== SECTION: GIT ====
@@ -375,21 +372,50 @@ func renderEffortSegment(level, model string) string {
 	return colorize(effortDisplay(level), colorLightBlack)
 }
 
-func renderContextSegment(usedPct float64) string {
-	return colorize(contextDisplay(usedPct), colorLightBlack)
+// pctColor returns the threshold color for a usage percentage:
+// red at >= 95, yellow at >= 80, otherwise the dim default.
+func pctColor(pct float64) string {
+	switch {
+	case pct >= 95:
+		return colorLightRed
+	case pct >= 80:
+		return colorLightYellow
+	default:
+		return colorLightBlack
+	}
 }
 
-func renderSessionSegment(pct float64) string {
+func renderContextSegment(usedPct float64) string {
+	pct := contextPct(usedPct)
+	return colorize("Ctx: ", colorLightBlack) +
+		colorize(fmt.Sprintf("%.1f%%", pct), pctColor(pct))
+}
+
+func renderSessionSegment(pct float64, resetsAt int64) string {
+	if resetsAt == 0 {
+		return colorize("Session: -%", colorLightBlack)
+	}
 	bar := renderBar(pct, 16)
-	return colorize(fmt.Sprintf("Session: [%s] %.1f%%", bar, pct), colorLightBlack)
+	return colorize(fmt.Sprintf("Session: [%s] ", bar), colorLightBlack) +
+		colorize(fmt.Sprintf("%.1f%%", pct), pctColor(pct))
 }
 
 func renderResetSegment(resetsAt int64, now int64) string {
+	if resetsAt == 0 {
+		return colorize("Reset: -", colorLightBlack)
+	}
 	remain := resetsAt - now
 	if remain < 0 {
 		remain = 0
 	}
 	return colorize("Reset: "+formatDuration(remain), colorLightBlack)
+}
+
+func renderVersionSegment(version string) string {
+	if version == "" {
+		return ""
+	}
+	return colorize("v"+version, colorLightBlack)
 }
 
 func joinSegments(parts []string) string {
@@ -401,6 +427,72 @@ func joinSegments(parts []string) string {
 		}
 	}
 	return strings.Join(out, sep)
+}
+
+// visibleWidth returns the rune count of s ignoring ANSI escape sequences
+// (`\x1b[...<letter>`). CJK / wide characters are counted as 1 — accept the
+// minor misalignment to keep the implementation dependency-free.
+func visibleWidth(s string) int {
+	n := 0
+	inEscape := false
+	for _, r := range s {
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == 0x1b {
+			inEscape = true
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// ccFrameMargin is the number of columns CC's TUI reserves around the
+// statusline content (left + right gutter). Without this offset, right-
+// aligning to the full terminal width pushes the trailing segment past CC's
+// clip region and it shows up truncated as `…`. Empirically 4 (2 left + 2
+// right) — bump it if the trailing segment still gets clipped.
+const ccFrameMargin = 4
+
+// termWidth returns the controlling terminal's column count, or 0 if it
+// can't be determined (e.g. no /dev/tty available).
+func termWidth() int {
+	f, err := os.Open("/dev/tty")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	var ws struct {
+		Row, Col, Xpixel, Ypixel uint16
+	}
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		f.Fd(),
+		syscall.TIOCGWINSZ,
+		uintptr(unsafe.Pointer(&ws)),
+	)
+	if errno != 0 {
+		return 0
+	}
+	return int(ws.Col)
+}
+
+// alignRight glues right flush to column totalWidth, padding with spaces.
+// If width is unknown (<=0) or there's no room, falls back to a single
+// space gap so version still appears.
+func alignRight(left, right string, totalWidth int) string {
+	if right == "" {
+		return left
+	}
+	used := visibleWidth(left) + visibleWidth(right)
+	if totalWidth <= 0 || used > totalWidth {
+		return left + " " + right
+	}
+	return left + strings.Repeat(" ", totalWidth-used) + right
 }
 
 // ==== SECTION: MAIN ====
@@ -426,9 +518,12 @@ func main() {
 	modelSeg := renderModelSegment(in.Model.DisplayName)
 	effortSeg := renderEffortSegment(in.Effort.Level, in.Model.DisplayName)
 	ctxSeg := renderContextSegment(in.ContextWindow.UsedPercentage)
-	sessSeg := renderSessionSegment(in.RateLimits.FiveHour.UsedPercentage)
+	sessSeg := renderSessionSegment(in.RateLimits.FiveHour.UsedPercentage, in.RateLimits.FiveHour.ResetsAt)
 	resetSeg := renderResetSegment(in.RateLimits.FiveHour.ResetsAt, time.Now().Unix())
+	versionSeg := renderVersionSegment(in.Version)
 
-	out := joinSegments([]string{pathSeg, gitSeg, modelSeg, effortSeg, ctxSeg, sessSeg, resetSeg})
+	left := joinSegments([]string{pathSeg, gitSeg, modelSeg, effortSeg, ctxSeg, sessSeg, resetSeg})
+	width := termWidth() - ccFrameMargin
+	out := alignRight(left, versionSeg, width)
 	fmt.Print(out)
 }
