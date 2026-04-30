@@ -264,7 +264,7 @@ func contextPct(usedPct float64) float64 {
 }
 
 func contextDisplay(usedPct float64) string {
-	return fmt.Sprintf("Ctx: %.1f%%", contextPct(usedPct))
+	return fmt.Sprintf("Ctx: %.0f%%", contextPct(usedPct))
 }
 
 // ==== SECTION: GIT ====
@@ -388,7 +388,7 @@ func pctColor(pct float64) string {
 func renderContextSegment(usedPct float64) string {
 	pct := contextPct(usedPct)
 	return colorize("Ctx: ", colorLightBlack) +
-		colorize(fmt.Sprintf("%.1f%%", pct), pctColor(pct))
+		colorize(fmt.Sprintf("%.0f%%", pct), pctColor(pct))
 }
 
 func renderSessionSegment(pct float64, resetsAt int64) string {
@@ -522,7 +522,13 @@ func main() {
 	resetSeg := renderResetSegment(in.RateLimits.FiveHour.ResetsAt, time.Now().Unix())
 	versionSeg := renderVersionSegment(in.Version)
 
-	left := joinSegments([]string{pathSeg, gitSeg, modelSeg, effortSeg, ctxSeg, sessSeg, resetSeg})
+	// Path + git share a "where am I" unit — glue with a space, no separator.
+	pathGitSeg := pathSeg
+	if gitSeg != "" {
+		pathGitSeg += " " + gitSeg
+	}
+
+	left := joinSegments([]string{pathGitSeg, modelSeg, effortSeg, ctxSeg, sessSeg, resetSeg})
 	width := termWidth() - ccFrameMargin
 	out := alignRight(left, versionSeg, width)
 	fmt.Print(out)

@@ -221,12 +221,12 @@ func TestContextPercent(t *testing.T) {
 		usedPct float64
 		want    string
 	}{
-		{0, "Ctx: 0.0%"},
-		{4, "Ctx: 5.0%"}, // 4 / 0.8 = 5
-		{8, "Ctx: 10.0%"},
-		{40, "Ctx: 50.0%"},
-		{80, "Ctx: 100.0%"},
-		{4.48, "Ctx: 5.6%"},
+		{0, "Ctx: 0%"},
+		{4, "Ctx: 5%"}, // 4 / 0.8 = 5
+		{8, "Ctx: 10%"},
+		{40, "Ctx: 50%"},
+		{80, "Ctx: 100%"},
+		{4.48, "Ctx: 6%"}, // 4.48 / 0.8 = 5.6 → rounds to 6
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
@@ -387,7 +387,7 @@ func TestRenderContextSegmentColors(t *testing.T) {
 			if !strings.HasPrefix(got, labelWrapped) {
 				t.Errorf("label not dim: %q", got)
 			}
-			valueWrapped := colorize(fmt.Sprintf("%.1f%%", contextPct(tt.usedPct)), tt.valColor)
+			valueWrapped := colorize(fmt.Sprintf("%.0f%%", contextPct(tt.usedPct)), tt.valColor)
 			if !strings.Contains(got, valueWrapped) {
 				t.Errorf("renderContextSegment(%v) = %q, missing value %q", tt.usedPct, got, valueWrapped)
 			}
