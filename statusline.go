@@ -458,10 +458,9 @@ func visibleWidth(s string) int {
 // right) — bump it if the trailing segment still gets clipped.
 const ccFrameMargin = 4
 
-// termWidth returns the controlling terminal's column count, or 0 if it
-// can't be determined (e.g. no /dev/tty available).
-func termWidth() int {
-	f, err := os.Open("/dev/tty")
+// widthFromPath ioctls TIOCGWINSZ on the given path and returns col, or 0.
+func widthFromPath(p string) int {
+	f, err := os.Open(p)
 	if err != nil {
 		return 0
 	}
@@ -479,6 +478,57 @@ func termWidth() int {
 		return 0
 	}
 	return int(ws.Col)
+}
+
+// widthFromProcFD walks fd 0/1/2 of pid looking for a TTY symlink target,
+// then queries its size.
+func widthFromProcFD(pid int) int {
+	for _, fd := range []string{"0", "1", "2"} {
+		target, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%s", pid, fd))
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(target, "/dev/pts/") || target == "/dev/tty" {
+			if w := widthFromPath(target); w > 0 {
+				return w
+			}
+		}
+	}
+	return 0
+}
+
+// readPPID parses /proc/<pid>/status for the PPid: field.
+func readPPID(pid int) int {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "PPid:") {
+			var ppid int
+			fmt.Sscanf(line, "PPid: %d", &ppid)
+			return ppid
+		}
+	}
+	return 0
+}
+
+// termWidth returns the terminal column count. CC ≥2.1.139 often spawns the
+// statusline subprocess via setsid (no controlling TTY), so /dev/tty fails.
+// Fallback: walk parent process tree until we find one whose stdin/out/err
+// is a /dev/pts/* TTY (typically CC itself), then ioctl that.
+func termWidth() int {
+	if w := widthFromPath("/dev/tty"); w > 0 {
+		return w
+	}
+	pid := os.Getppid()
+	for i := 0; i < 6 && pid > 1; i++ {
+		if w := widthFromProcFD(pid); w > 0 {
+			return w
+		}
+		pid = readPPID(pid)
+	}
+	return 0
 }
 
 // alignRight glues right flush to column totalWidth, padding with spaces.
