@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseInput(t *testing.T) {
@@ -130,7 +131,7 @@ func TestRenderBar(t *testing.T) {
 		{50, "████████░░░░░░░░"},
 		{100, "████████████████"},
 		{150, "████████████████"}, // clamp
-		{-5, "░░░░░░░░░░░░░░░░"}, // clamp
+		{-5, "░░░░░░░░░░░░░░░░"},  // clamp
 	}
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
@@ -183,6 +184,7 @@ func TestEffortDisplay(t *testing.T) {
 		{"high", "● high"},
 		{"xhigh", "◉ xhigh"},
 		{"max", "◈ max"},
+		{"ultracode", "❖ ultracode"},
 		{"unknown", "● high"}, // default fallback
 		{"", "● high"},
 	}
@@ -192,6 +194,123 @@ func TestEffortDisplay(t *testing.T) {
 				t.Errorf("effortDisplay(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLastEffortChange(t *testing.T) {
+	marker := func(level, scope string) string {
+		return `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to ` +
+			level + ` (` + scope + `): description</local-command-stdout>"}}`
+	}
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{"ultracode entry", marker("ultracode", "this session only"), "ultracode"},
+		{"last entry wins", marker("ultracode", "this session only") + "\n" + marker("xhigh", "saved as your default for new sessions"), "xhigh"},
+		{"ultracode after xhigh", marker("xhigh", "saved") + "\n" + marker("ultracode", "this session only"), "ultracode"},
+		{"no marker", `{"type":"user","message":{"role":"user","content":"hello"}}`, ""},
+		{"empty input", "", ""},
+		{"quoted in tool result is array content", `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"<local-command-stdout>Set effort level to ultracode (this session only)</local-command-stdout>"}]}}`, ""},
+		{"marker mid-string is not a match", `{"type":"user","message":{"role":"user","content":"see <local-command-stdout>Set effort level to ultracode (x)</local-command-stdout>"}}`, ""},
+		{"non-user type skipped", `{"type":"assistant","message":{"role":"assistant","content":"<local-command-stdout>Set effort level to ultracode (x)</local-command-stdout>"}}`, ""},
+		{"malformed json skipped", `not json <local-command-stdout>Set effort level to ultracode`, ""},
+		{"truncated first line skipped, later entry found", `ent level to max (x)</local-command-stdout>"}}` + "\n" + marker("ultracode", "this session only"), "ultracode"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, _ := lastEffortChange([]byte(tt.data)); got != tt.want {
+				t.Errorf("lastEffortChange = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLastEffortChangeTimestamp(t *testing.T) {
+	line := `{"type":"user","timestamp":"2026-06-10T04:15:49.297Z","message":{"role":"user","content":"<local-command-stdout>Set effort level to ultracode (this session only): desc</local-command-stdout>"}}`
+	level, ts := lastEffortChange([]byte(line))
+	if level != "ultracode" {
+		t.Fatalf("level = %q, want ultracode", level)
+	}
+	want := time.Date(2026, 6, 10, 4, 15, 49, 297000000, time.UTC)
+	if !ts.Equal(want) {
+		t.Errorf("ts = %v, want %v", ts, want)
+	}
+
+	noTS := `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set effort level to ultracode (x): desc</local-command-stdout>"}}`
+	if _, ts := lastEffortChange([]byte(noTS)); !ts.IsZero() {
+		t.Errorf("missing timestamp should yield zero time, got %v", ts)
+	}
+}
+
+func TestUltracodeMarkerStale(t *testing.T) {
+	ts := time.Date(2026, 6, 10, 4, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name    string
+		ts      time.Time
+		ccStart int64
+		want    bool
+	}{
+		{"marker before process start", ts, ts.Unix() + 100, true},
+		{"marker after process start", ts, ts.Unix() - 100, false},
+		{"marker at process start", ts, ts.Unix(), false},
+		{"unknown process start", ts, 0, false},
+		{"zero timestamp", time.Time{}, ts.Unix(), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ultracodeMarkerStale(tt.ts, tt.ccStart); got != tt.want {
+				t.Errorf("ultracodeMarkerStale = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseStarttimeTicks(t *testing.T) {
+	tests := []struct {
+		name string
+		stat string
+		want int64
+	}{
+		{"simple comm", "123 (claude) S 1 123 123 0 -1 4194304 1 0 0 0 5 3 0 0 20 0 8 0 4567890 1000 1 18446744073709551615", 4567890},
+		{"comm with space and parens", "6657 (tmux: (server)) S 1 6657 6657 0 -1 4194304 1 0 0 0 5 3 0 0 20 0 1 0 998877 1000 1 18446744073709551615", 998877},
+		{"too few fields", "123 (x) S 1 2", 0},
+		{"no parens", "garbage", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseStarttimeTicks(tt.stat); got != tt.want {
+				t.Errorf("parseStarttimeTicks = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseBtime(t *testing.T) {
+	procStat := "cpu  1 2 3 4\ncpu0 1 2 3 4\nbtime 1749500000\nprocesses 999\n"
+	if got := parseBtime(procStat); got != 1749500000 {
+		t.Errorf("parseBtime = %d, want 1749500000", got)
+	}
+	if got := parseBtime("cpu 1 2 3\n"); got != 0 {
+		t.Errorf("parseBtime without btime = %d, want 0", got)
+	}
+}
+
+func TestResolveEffortLevel(t *testing.T) {
+	if got := resolveEffortLevel("max", "/nonexistent"); got != "max" {
+		t.Errorf("non-xhigh level should pass through, got %q", got)
+	}
+	// Future CC versions may emit ultracode directly; it must pass through
+	// without touching the transcript.
+	if got := resolveEffortLevel("ultracode", "/nonexistent"); got != "ultracode" {
+		t.Errorf("direct ultracode should pass through, got %q", got)
+	}
+	if got := resolveEffortLevel("xhigh", ""); got != "xhigh" {
+		t.Errorf("empty transcript path should pass through, got %q", got)
+	}
+	if got := resolveEffortLevel("xhigh", "/nonexistent"); got != "xhigh" {
+		t.Errorf("unreadable transcript should pass through, got %q", got)
 	}
 }
 

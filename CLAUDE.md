@@ -8,7 +8,7 @@ A self-maintained custom statusline for Claude Code, written in Go. Replaces the
 
 Wired into CC via `~/.claude/settings.json`:
 ```json
-"statusLine": { "type": "command", "command": "~/.claude/bin/statusline.sh", "refreshInterval": 1 }
+"statusLine": { "type": "command", "command": "~/personal/claude-statusline/statusline.sh", "refreshInterval": 1 }
 ```
 
 ## Commands
@@ -25,8 +25,8 @@ go test -v ./...                    # verbose
 # Manual end-to-end smoke test
 echo '{"model":{"display_name":"Opus 4.7 (1M context)"},"workspace":{"current_dir":"/tmp"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":10,"resets_at":0}},"effort":{"level":"max"}}' | ./statusline
 
-# Capture the actual stdin CC is sending right now (one-shot)
-touch ~/.claude/bin/.dump-stdin && sleep 1.5 && cat ~/.claude/bin/cc-stdin.json | jq .
+# Capture the actual stdin CC is sending right now (one-shot, from the repo dir)
+touch .dump-stdin && sleep 1.5 && jq . cc-stdin.json
 ```
 
 Build failures are captured in `build.log` next to the script and do NOT overwrite the existing binary — the previous version keeps running so CC's status bar never breaks.
@@ -40,10 +40,12 @@ Single Go file (`statusline.go`) partitioned by `// ==== SECTION: NAME ====` com
 2. Render each segment as a pure function of fields read directly from stdin — `Effort.Level`, `Model.DisplayName`, `Workspace.CurrentDir`, `ContextWindow.UsedPercentage`, `RateLimits.FiveHour.*`.
 3. Print joined output. No state is persisted between ticks.
 
-CC's stdin (since 2.1.119) directly emits `effort.level` (already resolved — `auto` becomes the concrete value like `max`/`high`/`medium`), so there's no transcript scanning, no sidecar cache, and no `~/.claude/settings.json` fallback. Earlier versions of this codebase had all three; `git log -- statusline.go` shows the simplification commit.
+CC's stdin (since 2.1.119) directly emits `effort.level` (already resolved — `auto` becomes the concrete value like `max`/`high`/`medium`), so there's no sidecar cache and no `~/.claude/settings.json` fallback. Earlier versions of this codebase had both; `git log -- statusline.go` shows the simplification commit. The one transcript read is the ultracode disambiguation below.
 
 ### Effort display rules
-- `effort.level` comes pre-resolved from CC stdin. Map keys: `low`, `medium`, `high`, `xhigh`, `max`. Unknown values fall back to `high` icon.
+- `effort.level` comes pre-resolved from CC stdin. Map keys: `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`. Unknown values fall back to `high` icon.
+- CC never emits `ultracode` in `effort.level` — the stdin enum stops at the five levels above, and ultracode sessions report `xhigh` (ultracode is a session-scoped flag held in CC process memory; not in settings.json, not in any env var). When stdin says `xhigh`, `resolveEffortLevel` reads the last 4 MiB of `transcript_path` and takes the most recent `/effort` output entry (`<local-command-stdout>Set effort level to …`). Genuine entries are type-`user` with plain-string content; quoted copies inside tool results have array content and don't match. Resume staleness is handled by `ultracodeMarkerStale`: a marker timestamped before the owning `claude` process started (parent-tree walk via `readPPID`; start = `/proc/stat` btime + `/proc/<pid>/stat` starttime at USER_HZ 100) is ignored — session-scoped ultracode doesn't survive a CC restart.
+- The transcript fallback is temporary scaffolding. A future CC version will likely emit ultracode (or a workflow flag) in stdin directly; `resolveEffortLevel` already passes a literal `ultracode` level straight through, so when that happens the fallback (`resolveEffortLevel` transcript scan, `ultracodeMarkerStale`, `ccStartUnix`/`processStartUnix`/`parseStarttimeTicks`/`parseBtime`, `readFileTail`) can be deleted wholesale — the icon map alone suffices. After a CC update, `touch .dump-stdin` and check the JSON for ultracode/workflow fields.
 - Haiku models hide the effort segment entirely (`modelHasNoEffort`).
 
 ### Path abbreviation (`fitPath`)

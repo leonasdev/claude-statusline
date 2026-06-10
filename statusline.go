@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,7 +43,8 @@ type Input struct {
 	Effort struct {
 		Level string `json:"level"`
 	} `json:"effort"`
-	Version string `json:"version"`
+	TranscriptPath string `json:"transcript_path"`
+	Version        string `json:"version"`
 }
 
 func parseInput(r io.Reader) (*Input, error) {
@@ -234,11 +236,12 @@ func formatDuration(secs int64) string {
 // ==== SECTION: EFFORT/MODEL DISPLAY ====
 
 var effortIcons = map[string]string{
-	"low":    "○ low",
-	"medium": "◐ medium",
-	"high":   "● high",
-	"xhigh":  "◉ xhigh",
-	"max":    "◈ max",
+	"low":       "○ low",
+	"medium":    "◐ medium",
+	"high":      "● high",
+	"xhigh":     "◉ xhigh",
+	"max":       "◈ max",
+	"ultracode": "❖ ultracode",
 }
 
 func effortDisplay(level string) string {
@@ -246,6 +249,164 @@ func effortDisplay(level string) string {
 		return v
 	}
 	return effortIcons["high"]
+}
+
+// CC never emits "ultracode" in effort.level — the stdin enum is only
+// low/medium/high/xhigh/max, and ultracode sessions report "xhigh". The one
+// on-disk trace of ultracode is the /effort output recorded in the transcript.
+
+const effortMarker = `<local-command-stdout>Set effort level to `
+
+// transcriptTailBytes bounds how much of the transcript is scanned per tick.
+const transcriptTailBytes = 4 << 20
+
+// lastEffortChange returns the level word and timestamp of the most recent
+// /effort entry in the given transcript JSONL bytes, or ("", zero) if there
+// is none. Genuine entries are type "user" with plain-string content starting
+// with effortMarker; quoted copies inside tool results have array content and
+// don't match.
+func lastEffortChange(data []byte) (string, time.Time) {
+	lines := bytes.Split(data, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !bytes.Contains(lines[i], []byte(effortMarker)) {
+			continue
+		}
+		var entry struct {
+			Type      string `json:"type"`
+			Timestamp string `json:"timestamp"`
+			Message   struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(lines[i], &entry) != nil || entry.Type != "user" {
+			continue
+		}
+		var content string
+		if json.Unmarshal(entry.Message.Content, &content) != nil {
+			continue
+		}
+		rest, ok := strings.CutPrefix(content, effortMarker)
+		if !ok {
+			continue
+		}
+		end := 0
+		for end < len(rest) && rest[end] >= 'a' && rest[end] <= 'z' {
+			end++
+		}
+		ts, _ := time.Parse(time.RFC3339, entry.Timestamp)
+		return rest[:end], ts
+	}
+	return "", time.Time{}
+}
+
+// ultracodeMarkerStale reports whether a marker written at ts predates the
+// owning claude process started at ccStart (unix seconds). Session-scoped
+// ultracode lives in CC process memory and does not survive a restart, so a
+// marker older than the process belongs to a previous run of the session.
+func ultracodeMarkerStale(ts time.Time, ccStart int64) bool {
+	return ccStart > 0 && !ts.IsZero() && ts.Unix() < ccStart
+}
+
+// resolveEffortLevel upgrades an xhigh level to ultracode when the
+// transcript's most recent /effort entry set ultracode in the current run.
+func resolveEffortLevel(level, transcriptPath string) string {
+	if !strings.EqualFold(level, "xhigh") || transcriptPath == "" {
+		return level
+	}
+	data, err := readFileTail(transcriptPath, transcriptTailBytes)
+	if err != nil {
+		return level
+	}
+	marker, ts := lastEffortChange(data)
+	if marker != "ultracode" || ultracodeMarkerStale(ts, ccStartUnix()) {
+		return level
+	}
+	return "ultracode"
+}
+
+// ccStartUnix returns the start time (unix seconds) of the claude process
+// owning this statusline, found by walking the parent tree. Returns 0 if it
+// can't be determined.
+func ccStartUnix() int64 {
+	pid := os.Getppid()
+	for i := 0; i < 6 && pid > 1; i++ {
+		comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+		if err != nil {
+			return 0
+		}
+		exe, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+		if strings.TrimSpace(string(comm)) == "claude" || strings.Contains(exe, "/claude/") {
+			return processStartUnix(pid)
+		}
+		pid = readPPID(pid)
+	}
+	return 0
+}
+
+// processStartUnix converts /proc/<pid>/stat starttime (clock ticks since
+// boot, USER_HZ=100) plus /proc/stat btime into wall-clock unix seconds.
+func processStartUnix(pid int) int64 {
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0
+	}
+	ticks := parseStarttimeTicks(string(stat))
+	sys, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return 0
+	}
+	btime := parseBtime(string(sys))
+	if ticks <= 0 || btime <= 0 {
+		return 0
+	}
+	return btime + ticks/100
+}
+
+// parseStarttimeTicks extracts field 22 (starttime) from /proc/<pid>/stat.
+// The comm field (2) can contain spaces and parentheses, so fields are
+// counted after the last ')'.
+func parseStarttimeTicks(stat string) int64 {
+	i := strings.LastIndexByte(stat, ')')
+	if i < 0 {
+		return 0
+	}
+	fields := strings.Fields(stat[i+1:])
+	if len(fields) < 20 {
+		return 0
+	}
+	var ticks int64
+	fmt.Sscanf(fields[19], "%d", &ticks)
+	return ticks
+}
+
+// parseBtime extracts the boot time (unix seconds) from /proc/stat.
+func parseBtime(procStat string) int64 {
+	for _, line := range strings.Split(procStat, "\n") {
+		if rest, ok := strings.CutPrefix(line, "btime "); ok {
+			var b int64
+			fmt.Sscanf(rest, "%d", &b)
+			return b
+		}
+	}
+	return 0
+}
+
+func readFileTail(path string, n int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if st.Size() > n {
+		if _, err := f.Seek(st.Size()-n, io.SeekStart); err != nil {
+			return nil, err
+		}
+	}
+	return io.ReadAll(f)
 }
 
 func modelDisplay(name string) string {
@@ -566,7 +727,7 @@ func main() {
 	pathSeg := renderPathSegment(in.Workspace.CurrentDir)
 	gitSeg := renderGitSegment(gitBranch, gitU, gitM, gitD)
 	modelSeg := renderModelSegment(in.Model.DisplayName)
-	effortSeg := renderEffortSegment(in.Effort.Level, in.Model.DisplayName)
+	effortSeg := renderEffortSegment(resolveEffortLevel(in.Effort.Level, in.TranscriptPath), in.Model.DisplayName)
 	ctxSeg := renderContextSegment(in.ContextWindow.UsedPercentage)
 	sessSeg := renderSessionSegment(in.RateLimits.FiveHour.UsedPercentage, in.RateLimits.FiveHour.ResetsAt)
 	resetSeg := renderResetSegment(in.RateLimits.FiveHour.ResetsAt, time.Now().Unix())
