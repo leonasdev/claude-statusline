@@ -385,22 +385,36 @@ func TestFormatGit(t *testing.T) {
 	tests := []struct {
 		branch                       string
 		untracked, modified, deleted int
+		statusOK                     bool
 		want                         string
 	}{
-		{"main", 0, 0, 0, " main"},
-		{"master", 3, 0, 0, " master ?3"},
-		{"feat/x", 0, 8, 0, " feat/x ~8"},
-		{"main", 0, 0, 2, " main -2"},
-		{"main", 3, 8, 2, " main ?3 ~8 -2"},
-		{"", 0, 0, 0, ""},
+		{"main", 0, 0, 0, true, " main"},
+		{"master", 3, 0, 0, true, " master ?3"},
+		{"feat/x", 0, 8, 0, true, " feat/x ~8"},
+		{"main", 0, 0, 2, true, " main -2"},
+		{"main", 3, 8, 2, true, " main ?3 ~8 -2"},
+		{"", 0, 0, 0, true, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := formatGit(tt.branch, tt.untracked, tt.modified, tt.deleted)
+			got := formatGit(tt.branch, tt.untracked, tt.modified, tt.deleted, tt.statusOK)
 			if got != tt.want {
 				t.Errorf("formatGit = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFormatGitStatusUnavailable(t *testing.T) {
+	// status timed out / errored: counts are meaningless, drop them and
+	// show the branch + unknown marker (not a misleading clean state).
+	want := gitBranchIcon + " main " + gitStatusUnknownMarker
+	if got := formatGit("main", 3, 8, 2, false); got != want {
+		t.Errorf("formatGit unavailable = %q, want %q", got, want)
+	}
+	// no branch is still empty even when status failed
+	if got := formatGit("", 0, 0, 0, false); got != "" {
+		t.Errorf("formatGit empty branch = %q, want \"\"", got)
 	}
 }
 
@@ -448,13 +462,13 @@ func TestRenderEffortSegmentHaikuHidden(t *testing.T) {
 }
 
 func TestRenderGitSegmentEmpty(t *testing.T) {
-	if got := renderGitSegment("", 0, 0, 0); got != "" {
+	if got := renderGitSegment("", 0, 0, 0, true); got != "" {
 		t.Errorf("git with no branch should be empty, got %q", got)
 	}
 }
 
 func TestRenderGitSegment(t *testing.T) {
-	got := renderGitSegment("main", 3, 8, 2)
+	got := renderGitSegment("main", 3, 8, 2, true)
 	want := colorLightYellow + " main ?3 ~8 -2" + colorReset
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)

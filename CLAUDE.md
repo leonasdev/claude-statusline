@@ -59,6 +59,8 @@ CC's stdin (since 2.1.119) directly emits `effort.level` (already resolved — `
 ### Git segment
 Runs `git branch --show-current` + `git status --porcelain=v1 -uall` in the CWD. Falls back to short SHA for detached HEAD. Rename/copy (`R`/`C`) porcelain entries are ignored by design. Not cached — `git status` is already <10ms on small repos and caching would lag visible state.
 
+The porcelain call is bounded by `gitStatusTimeout` (1s) via `exec.CommandContext`: `-uall` enumerates every untracked file, so a repo with a huge untracked tree (un-ignored build/data dir) takes seconds and would block the whole render. On timeout `runGitInfo` returns `statusOK=false`, and the segment shows `{branch} …` (`gitStatusUnknownMarker`) instead of the dirty counts — branch is fetched first so it survives. The SIGKILL on timeout is safe: `--no-optional-locks` status is read-only and takes no `index.lock`.
+
 ### Color handling
 Path segment is wrapped with a full `\x1b[0m` reset (not just `\x1b[39m`) so CC's TUI ambient attributes (dim, bold) don't bleed into it. Don't "simplify" that to a plain foreground reset.
 

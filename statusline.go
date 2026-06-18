@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -432,6 +433,16 @@ func contextDisplay(usedPct float64) string {
 
 const gitBranchIcon = "" // Nerd Font branch glyph
 
+// gitStatusTimeout bounds the porcelain call. `-uall` enumerates every untracked
+// file, so a repo with a huge untracked tree (un-ignored build/data dir) can take
+// seconds; without a ceiling the whole statusline blocks and never renders. On
+// timeout we keep the branch (fetched first, instant) and drop the dirty counts.
+const gitStatusTimeout = 1 * time.Second
+
+// gitStatusUnknownMarker is appended after the branch when status couldn't be
+// computed within gitStatusTimeout — signals "counts unknown", not "clean".
+const gitStatusUnknownMarker = "…"
+
 func parsePorcelain(raw string) (untracked, modified, deleted int) {
 	for _, line := range strings.Split(raw, "\n") {
 		if len(line) < 2 {
@@ -458,11 +469,14 @@ func parsePorcelain(raw string) (untracked, modified, deleted int) {
 	return
 }
 
-func formatGit(branch string, untracked, modified, deleted int) string {
+func formatGit(branch string, untracked, modified, deleted int, statusOK bool) string {
 	if branch == "" {
 		return ""
 	}
 	out := gitBranchIcon + " " + branch
+	if !statusOK {
+		return out + " " + gitStatusUnknownMarker
+	}
 	if untracked > 0 {
 		out += fmt.Sprintf(" ?%d", untracked)
 	}
@@ -475,11 +489,13 @@ func formatGit(branch string, untracked, modified, deleted int) string {
 	return out
 }
 
-// runGitInfo fetches branch + porcelain. Returns ("", 0,0,0) if not in a repo.
-func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
+// runGitInfo fetches branch + porcelain. Returns ("", …, false) if not in a repo.
+// statusOK is false when the porcelain call errored or timed out (see
+// gitStatusTimeout) — the counts are then meaningless and callers show a marker.
+func runGitInfo(cwd string) (branch string, untracked, modified, deleted int, statusOK bool) {
 	bb, err := exec.Command("git", "-C", cwd, "branch", "--show-current").Output()
 	if err != nil {
-		return "", 0, 0, 0
+		return "", 0, 0, 0, false
 	}
 	branch = strings.TrimSpace(string(bb))
 	if branch == "" {
@@ -489,12 +505,16 @@ func runGitInfo(cwd string) (branch string, untracked, modified, deleted int) {
 			branch = strings.TrimSpace(string(ss))
 		}
 	}
-	pb, err := exec.Command("git", "-C", cwd, "--no-optional-locks", "status", "--porcelain=v1", "-uall").Output()
+	// --no-optional-locks status is read-only and takes no index.lock, so the
+	// SIGKILL exec.CommandContext sends on timeout leaves nothing to clean up.
+	ctx, cancel := context.WithTimeout(context.Background(), gitStatusTimeout)
+	defer cancel()
+	pb, err := exec.CommandContext(ctx, "git", "-C", cwd, "--no-optional-locks", "status", "--porcelain=v1", "-uall").Output()
 	if err != nil {
-		return branch, 0, 0, 0
+		return branch, 0, 0, 0, false
 	}
 	u, m, d := parsePorcelain(string(pb))
-	return branch, u, m, d
+	return branch, u, m, d, true
 }
 
 // ==== SECTION: SEGMENT RENDERERS ====
@@ -509,8 +529,8 @@ func renderPathSegment(cwd string) string {
 	return colorize(fitPath(displayed), colorDefaultFg)
 }
 
-func renderGitSegment(branch string, untracked, modified, deleted int) string {
-	raw := formatGit(branch, untracked, modified, deleted)
+func renderGitSegment(branch string, untracked, modified, deleted int, statusOK bool) string {
+	raw := formatGit(branch, untracked, modified, deleted, statusOK)
 	if raw == "" {
 		return ""
 	}
@@ -722,10 +742,10 @@ func main() {
 		return
 	}
 
-	gitBranch, gitU, gitM, gitD := runGitInfo(in.Workspace.CurrentDir)
+	gitBranch, gitU, gitM, gitD, gitOK := runGitInfo(in.Workspace.CurrentDir)
 
 	pathSeg := renderPathSegment(in.Workspace.CurrentDir)
-	gitSeg := renderGitSegment(gitBranch, gitU, gitM, gitD)
+	gitSeg := renderGitSegment(gitBranch, gitU, gitM, gitD, gitOK)
 	modelSeg := renderModelSegment(in.Model.DisplayName)
 	effortSeg := renderEffortSegment(resolveEffortLevel(in.Effort.Level, in.TranscriptPath), in.Model.DisplayName)
 	ctxSeg := renderContextSegment(in.ContextWindow.UsedPercentage)
